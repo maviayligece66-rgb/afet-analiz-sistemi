@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Afet Dirençliliği ve Güvenli Şehir Analizi Sistemi</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        #map {
+            height: 420px;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-950 text-white min-h-screen">
+
+    <header class="p-6 bg-slate-900 shadow-lg">
+        <h1 class="text-3xl font-bold text-center">
+            Afet Dirençliliği ve Güvenli Şehir Analizi Sistemi
+        </h1>
+        <p class="text-center text-slate-300 mt-2">
+            Yapay zekâ destekli şehir risk analizi platformu
+        </p>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl">
+            <h2 class="text-2xl font-semibold mb-4">Risk Tahmin Formu</h2>
+
+            <div class="space-y-4">
+
+                <input id="city" class="w-full p-3 rounded bg-slate-800 border border-slate-700"
+                    placeholder="Şehir adı örn: Kayseri">
+
+                <input id="buildingAge" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700"
+                    placeholder="Bina yaşı">
+
+                <input id="populationDensity" type="number"
+                    class="w-full p-3 rounded bg-slate-800 border border-slate-700" placeholder="Nüfus yoğunluğu">
+
+                <input id="pastDisasters" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700"
+                    placeholder="Geçmiş afet sayısı">
+
+                <input id="hospitalCount" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700"
+                    placeholder="Hastane sayısı">
+
+                <input id="infrastructureScore" type="number"
+                    class="w-full p-3 rounded bg-slate-800 border border-slate-700"
+                    placeholder="Altyapı dayanıklılığı 0-100">
+
+                <input id="assemblyAreaCount" type="number"
+                    class="w-full p-3 rounded bg-slate-800 border border-slate-700" placeholder="Toplanma alanı sayısı">
+
+                <button onclick="predictRisk()" class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded-xl font-bold">
+                    Risk Analizi Yap
+                </button>
+
+            </div>
+        </section>
+
+        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl">
+            <h2 class="text-2xl font-semibold mb-4">Tahmin Sonucu</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                <div class="bg-slate-800 p-5 rounded-xl">
+                    <p class="text-slate-400">Risk Seviyesi</p>
+                    <h3 id="riskLevel" class="text-2xl font-bold mt-2">-</h3>
+                </div>
+
+                <div class="bg-slate-800 p-5 rounded-xl">
+                    <p class="text-slate-400">Dayanıklılık Puanı</p>
+                    <h3 id="resilienceScore" class="text-2xl font-bold mt-2">-</h3>
+                </div>
+
+                <div class="bg-slate-800 p-5 rounded-xl">
+                    <p class="text-slate-400">Sınıflandırma</p>
+                    <h3 id="safetyClass" class="text-2xl font-bold mt-2">-</h3>
+                </div>
+
+            </div>
+
+            <div class="mt-6">
+                <h3 class="text-xl font-semibold mb-3">Risk Barı</h3>
+                <div class="w-full bg-slate-700 rounded-full h-6">
+                    <div id="riskBar" class="h-6 rounded-full bg-green-500 text-center text-sm" style="width: 0%">
+                        0%
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 bg-slate-800 p-4 rounded-xl">
+                <h3 class="text-xl font-semibold mb-2">Öneri</h3>
+                <p id="recommendation" class="text-slate-300">
+                    Henüz analiz yapılmadı.
+                </p>
+            </div>
+        </section>
+
+        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl lg:col-span-2">
+            <h2 class="text-2xl font-semibold mb-4">Türkiye Haritası Risk Analizi</h2>
+            <div id="map"></div>
+        </section>
+
+    </main>
+
+    <script>
+        const map = L.map('map').setView([39.0, 35.0], 6);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        const cityCoordinates = {
+            "İstanbul": [41.0082, 28.9784],
+            "Ankara": [39.9334, 32.8597],
+            "İzmir": [38.4237, 27.1428],
+            "Kayseri": [38.7205, 35.4826],
+            "Kahramanmaraş": [37.5753, 36.9228],
+            "Hatay": [36.2021, 36.1600],
+            "Malatya": [38.3552, 38.3095]
+        };
+
+        let marker;
+
+        function predictRisk() {
+            const city = document.getElementById("city").value || "Kayseri";
+
+            const buildingAge = Number(document.getElementById("buildingAge").value);
+            const populationDensity = Number(document.getElementById("populationDensity").value);
+            const pastDisasters = Number(document.getElementById("pastDisasters").value);
+            const hospitalCount = Number(document.getElementById("hospitalCount").value);
+            const infrastructureScore = Number(document.getElementById("infrastructureScore").value);
+            const assemblyAreaCount = Number(document.getElementById("assemblyAreaCount").value);
+
+            let riskScore =
+                buildingAge * 0.8 +
+                populationDensity * 0.02 +
+                pastDisasters * 5 -
+                hospitalCount * 0.4 -
+                infrastructureScore * 0.6 -
+                assemblyAreaCount * 0.2;
+
+            riskScore = Math.max(0, Math.min(100, Math.round(riskScore)));
+
+            let riskLevel = "";
+            let safetyClass = "";
+            let color = "";
+            let recommendation = "";
+
+            if (riskScore < 35) {
+                riskLevel = "Düşük";
+                safetyClass = "Güvenli";
+                color = "bg-green-500";
+                recommendation = "Şehir genel olarak düşük riskli görünüyor. Mevcut altyapı korunmalı.";
+            } else if (riskScore < 70) {
+                riskLevel = "Orta";
+                safetyClass = "Dikkatli Bölge";
+                color = "bg-yellow-500";
+                recommendation = "Orta risk tespit edildi. Toplanma alanları, hastane erişimi ve bina dayanıklılığı artırılmalı.";
+            } else {
+                riskLevel = "Yüksek";
+                safetyClass = "Güvensiz";
+                color = "bg-red-500";
+                recommendation = "Yüksek risk tespit edildi. Kentsel dönüşüm, afet planlaması ve acil müdahale kapasitesi güçlendirilmeli.";
+            }
+
+            const resilienceScore = 100 - riskScore;
+
+            document.getElementById("riskLevel").innerText = riskLevel;
+            document.getElementById("resilienceScore").innerText = resilienceScore + " / 100";
+            document.getElementById("safetyClass").innerText = safetyClass;
+            document.getElementById("recommendation").innerText = recommendation;
+
+            const riskBar = document.getElementById("riskBar");
+            riskBar.style.width = riskScore + "%";
+            riskBar.innerText = riskScore + "%";
+            riskBar.className = "h-6 rounded-full text-center text-sm " + color;
+
+            showCityOnMap(city, riskScore, riskLevel);
+        }
+
+        function showCityOnMap(city, riskScore, riskLevel) {
+            const coords = cityCoordinates[city] || cityCoordinates["Kayseri"];
+
+            if (marker) {
+                map.removeLayer(marker);
+            }
+
+            let circleColor = "green";
+
+            if (riskScore >= 35 && riskScore < 70) {
+                circleColor = "orange";
+            } else if (riskScore >= 70) {
+                circleColor = "red";
+            }
+
+            marker = L.circle(coords, {
+                color: circleColor,
+                fillColor: circleColor,
+                fillOpacity: 0.5,
+                radius: 50000
+            }).addTo(map);
+
+            marker.bindPopup(`
+        <b>${city}</b><br>
+        Risk Seviyesi: ${riskLevel}<br>
+        Risk Puanı: ${riskScore}
+      `).openPopup();
+
+            map.setView(coords, 8);
+        }
+    </script>
+
+</body>
+
+</html>

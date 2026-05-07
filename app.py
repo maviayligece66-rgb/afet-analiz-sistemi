@@ -4,12 +4,74 @@ import joblib
 import os
 import folium
 import requests
+import sqlite3
+from datetime import datetime
 
 app = Flask(__name__)
 
 base = os.path.dirname(os.path.abspath(__file__))
 data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
+db_yolu = os.path.join(base, 'analizler.db')
+
+
+def veritabani_olustur():
+    conn = sqlite3.connect(db_yolu)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analizler (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sehir TEXT,
+            nufus_yogunlugu REAL,
+            bina_yasi REAL,
+            yatak_kapasitesi REAL,
+            toplanma_alani REAL,
+            itfaiye_gucu REAL,
+            zemin_riski REAL,
+            tahmin_sonucu TEXT,
+            tarih TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def analiz_kaydet(sehir, inputs, sonuc):
+    conn = sqlite3.connect(db_yolu)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO analizler (
+            sehir, nufus_yogunlugu, bina_yasi, yatak_kapasitesi,
+            toplanma_alani, itfaiye_gucu, zemin_riski, tahmin_sonucu, tarih
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        sehir,
+        inputs[0],
+        inputs[1],
+        inputs[2],
+        inputs[3],
+        inputs[4],
+        inputs[5],
+        sonuc,
+        datetime.now().strftime("%d.%m.%Y %H:%M")
+    ))
+    conn.commit()
+    conn.close()
+
+
+def son_analizleri_getir():
+    conn = sqlite3.connect(db_yolu)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT sehir, tahmin_sonucu, tarih
+        FROM analizler
+        ORDER BY id DESC
+        LIMIT 5
+    """)
+    veriler = cursor.fetchall()
+    conn.close()
+    return veriler
 
 
 def canlı_depremleri_getir():
@@ -21,6 +83,9 @@ def canlı_depremleri_getir():
     except:
         pass
     return []
+
+
+veritabani_olustur()
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -81,14 +146,18 @@ def index():
 
                 res = model.predict(df_test)[0]
 
-                tahmin_sonucu, risk_rengi = {
+                sade_sonuc, risk_rengi = {
                     0: ["Güvenli Bölge", "#2ecc71"],
                     1: ["Orta Riskli", "#f1c40f"],
                     2: ["Kritik / Riskli", "#e74c3c"]
                 }[res]
 
                 if secilen_sehir:
-                    tahmin_sonucu = f"{secilen_sehir} için sonuç: {tahmin_sonucu}"
+                    tahmin_sonucu = f"{secilen_sehir} için sonuç: {sade_sonuc}"
+                else:
+                    tahmin_sonucu = sade_sonuc
+
+                analiz_kaydet(secilen_sehir, inputs, sade_sonuc)
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_
@@ -99,13 +168,26 @@ def index():
                         [f"{f}: %{round(i * 100, 1)} etkili" for f, i in pairs]
                     )
 
-        except:
+        except Exception as e:
             tahmin_sonucu = "Veri hatası!"
+            print("Hata:", e)
 
     sehir_options = ""
     for sehir in sehirler:
         selected = "selected" if sehir == secilen_sehir else ""
         sehir_options += f'<option value="{sehir}" {selected}>{sehir}</option>'
+
+    son_analizler = son_analizleri_getir()
+    son_analiz_html = ""
+
+    for sehir, sonuc, tarih in son_analizler:
+        son_analiz_html += f"""
+        <tr>
+            <td>{sehir}</td>
+            <td>{sonuc}</td>
+            <td>{tarih}</td>
+        </tr>
+        """
 
     html = f"""
     <!DOCTYPE html>
@@ -128,6 +210,19 @@ def index():
                 border-radius:10px;
                 font-size:0.92em;
                 line-height:1.6;
+            }}
+            table {{
+                width:100%;
+                border-collapse:collapse;
+                margin-top:15px;
+            }}
+            th, td {{
+                border:1px solid #ddd;
+                padding:10px;
+                text-align:left;
+            }}
+            th {{
+                background:#f2f2f2;
             }}
         </style>
     </head>
@@ -183,6 +278,18 @@ def index():
             <strong>⚠️ Zemin Uyarısı:</strong><br>
             Yumuşak zeminler deprem etkisini büyütür.
         </div>
+    </div>
+
+    <div class="box">
+        <h2>📁 Son Yapılan Analizler</h2>
+        <table>
+            <tr>
+                <th>Şehir</th>
+                <th>Tahmin Sonucu</th>
+                <th>Tarih</th>
+            </tr>
+            {son_analiz_html}
+        </table>
     </div>
 
     </body>

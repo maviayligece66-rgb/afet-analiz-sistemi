@@ -4,22 +4,35 @@ import joblib
 import os
 import folium
 import requests
+import json
+import unicodedata
 
 app = Flask(__name__)
 
 base = os.path.dirname(os.path.abspath(__file__))
+
 data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
+geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
+
+
+def normalize_text(text):
+    text = str(text).lower()
+    text = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in text if not unicodedata.combining(c))
 
 
 def canlı_depremleri_getir():
     try:
         url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
         r = requests.get(url, timeout=5)
+
         if r.status_code == 200:
             return r.json().get("result", [])[:15]
+
     except Exception as e:
         print("Deprem API hatası:", e)
+
     return []
 
 
@@ -74,52 +87,143 @@ def acil_oneriler_uret(risk_durumu, inputs):
     return list(dict.fromkeys(oneriler))
 
 
+def risk_skoru_getir(risk_durumu):
+    if risk_durumu == "Güvenli Bölge":
+        return 1
+    elif risk_durumu == "Orta Riskli":
+        return 3
+    elif risk_durumu == "Kritik / Riskli":
+        return 5
+    return 0
+
+
+def risk_rengi_getir(risk_skoru):
+    renkler = {
+        0: "#d9d9d9",
+        1: "#2ecc71",
+        2: "#f1c40f",
+        3: "#f39c12",
+        4: "#e74c3c",
+        5: "#8b0000"
+    }
+
+    return renkler.get(risk_skoru, "#d9d9d9")
+
+
+def geojson_sehir_adi_bul(feature):
+    props = feature.get("properties", {})
+
+    olasi_alanlar = [
+        "name",
+        "NAME_1",
+        "Name",
+        "il",
+        "Il",
+        "IL",
+        "province",
+        "Province",
+        "sehir",
+        "Sehir"
+    ]
+
+    for alan in olasi_alanlar:
+        if alan in props:
+            return props[alan]
+
+    return ""
+
+
+def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
+    if not os.path.exists(geojson_yolu):
+        print("GeoJSON dosyası bulunamadı:", geojson_yolu)
+        return
+
+    try:
+        with open(geojson_yolu, "r", encoding="utf-8") as f:
+            geojson_data = json.load(f)
+
+        secilen_norm = normalize_text(secilen_sehir)
+
+        def style_function(feature):
+            sehir_adi = geojson_sehir_adi_bul(feature)
+            sehir_norm = normalize_text(sehir_adi)
+
+            if secilen_norm and secilen_norm == sehir_norm:
+                return {
+                    "fillColor": risk_rengi_getir(risk_skoru),
+                    "color": "#111111",
+                    "weight": 2,
+                    "fillOpacity": 0.75
+                }
+
+            return {
+                "fillColor": "#f7f7f7",
+                "color": "#666666",
+                "weight": 1,
+                "fillOpacity": 0.25
+            }
+
+        def highlight_function(feature):
+            return {
+                "fillColor": "#ffff99",
+                "color": "#000000",
+                "weight": 3,
+                "fillOpacity": 0.7
+            }
+
+        folium.GeoJson(
+            geojson_data,
+            name="Şehir Risk Haritası",
+            style_function=style_function,
+            highlight_function=highlight_function,
+            tooltip=folium.GeoJsonTooltip(
+                fields=[],
+                aliases=[],
+                sticky=True,
+                labels=False
+            )
+        ).add_to(m)
+
+        if secilen_sehir and risk_skoru > 0:
+            folium.Marker(
+                location=[39, 35],
+                popup=f"{secilen_sehir} - {risk_durumu} - Risk Skoru: {risk_skoru}/5",
+                icon=folium.Icon(color="red", icon="info-sign")
+            ).add_to(m)
+
+    except Exception as e:
+        print("GeoJSON harita hatası:", e)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     tahmin_sonucu = ""
     risk_durumu = ""
     risk_rengi = "#2ecc71"
+    risk_skoru = 0
     aciklama = ""
     secilen_sehir = ""
     sehirler = []
     oneriler = []
-    acil_mod_aktif = False
 
     if os.path.exists(data_yolu):
         df = pd.read_csv(data_yolu)
         sehirler = sorted(df["Sehir"].dropna().unique())
 
     son_depremler = canlı_depremleri_getir()
+
     deprem_ozeti = " | ".join(
-        [f"{d.get('title','?')} ({d.get('mag','?')})" for d in son_depremler[:5]]
+        [f"{d.get('title', '?')} ({d.get('mag', '?')})" for d in son_depremler[:5]]
     )
-
-    m = folium.Map(location=[39, 35], zoom_start=6, tiles="cartodbpositron")
-
-    for d in son_depremler:
-        try:
-            lon, lat = d["geojson"]["coordinates"]
-            mag = float(d["mag"])
-
-            folium.Circle(
-                location=[lat, lon],
-                radius=mag * 5000,
-                color="darkred",
-                fill=True,
-                fill_color="red",
-                fill_opacity=0.4,
-                popup=f"{d.get('title','?')} - {mag}"
-            ).add_to(m)
-        except Exception:
-            continue
-
-    map_html = m._repr_html_()
 
     if request.method == "POST":
         try:
             secilen_sehir = request.form.get("sehir", "")
 
-            inputs = [float(request.form.get(x, 0)) for x in ['n', 'b', 'y', 't', 'i', 'z']]
+            inputs = [
+                float(request.form.get(x, 0))
+                for x in ['n', 'b', 'y', 't', 'i', 'z']
+            ]
 
             if os.path.exists(model_yolu):
                 model = joblib.load(model_yolu)
@@ -137,9 +241,11 @@ def index():
 
                 risk_durumu, risk_rengi = {
                     0: ["Güvenli Bölge", "#2ecc71"],
-                    1: ["Orta Riskli", "#f1c40f"],
+                    1: ["Orta Riskli", "#f39c12"],
                     2: ["Kritik / Riskli", "#e74c3c"]
                 }[res]
+
+                risk_skoru = risk_skoru_getir(risk_durumu)
 
                 tahmin_sonucu = risk_durumu
 
@@ -147,13 +253,25 @@ def index():
                     tahmin_sonucu = f"{secilen_sehir} için sonuç: {risk_durumu}"
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
-                acil_mod_aktif = risk_durumu == "Kritik / Riskli"
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_
-                    feats = ['Nüfus', 'Bina Yaşı', 'Yatak', 'Toplanma', 'İtfaiye', 'Zemin']
 
-                    pairs = sorted(zip(feats, imp), key=lambda x: x[1], reverse=True)
+                    feats = [
+                        'Nüfus',
+                        'Bina Yaşı',
+                        'Yatak',
+                        'Toplanma',
+                        'İtfaiye',
+                        'Zemin'
+                    ]
+
+                    pairs = sorted(
+                        zip(feats, imp),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+
                     aciklama = "<br>".join(
                         [f"{f}: %{round(i * 100, 1)} etkili" for f, i in pairs]
                     )
@@ -165,16 +283,58 @@ def index():
             tahmin_sonucu = "Veri hatası!"
             print("Model hata:", e)
 
+    m = folium.Map(
+        location=[39, 35],
+        zoom_start=6,
+        tiles="cartodbpositron"
+    )
+
+    sehirleri_renklendir(
+        m,
+        secilen_sehir,
+        risk_skoru,
+        risk_durumu
+    )
+
+    for d in son_depremler:
+        try:
+            lon, lat = d["geojson"]["coordinates"]
+            mag = float(d["mag"])
+
+            folium.Circle(
+                location=[lat, lon],
+                radius=mag * 5000,
+                color="darkred",
+                fill=True,
+                fill_color="red",
+                fill_opacity=0.4,
+                popup=f"{d.get('title', '?')} - {mag}"
+            ).add_to(m)
+
+        except Exception:
+            continue
+
+    folium.LayerControl().add_to(m)
+
+    map_html = m._repr_html_()
+
     sehir_options = ""
+
     for sehir in sehirler:
         selected = "selected" if sehir == secilen_sehir else ""
         sehir_options += f'<option value="{sehir}" {selected}>{sehir}</option>'
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
+    deprem_listesi_html = "".join([
+        f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')}</li>"
+        for d in son_depremler[:5]
+    ])
+
     html = f"""
     <!DOCTYPE html>
     <html lang="tr">
+
     <head>
         <meta charset="UTF-8">
         <meta http-equiv="refresh" content="60">
@@ -205,11 +365,18 @@ def index():
                 box-shadow:0 8px 25px rgba(0,0,0,0.25);
             }}
 
-            input, select {{
+            input,
+            select {{
                 padding:10px;
                 margin:5px;
                 border-radius:8px;
                 border:1px solid #ccc;
+            }}
+
+            label {{
+                display:block;
+                margin-top:10px;
+                font-weight:bold;
             }}
 
             button {{
@@ -228,6 +395,28 @@ def index():
                 padding:12px;
                 border-radius:10px;
                 color:black;
+                line-height:1.7;
+            }}
+
+            .risk-score-box {{
+                margin-top:15px;
+                padding:15px;
+                border-radius:10px;
+                background:#f8f9fa;
+                color:#222;
+                text-align:center;
+                font-size:20px;
+                font-weight:bold;
+                border:3px solid {risk_rengi};
+            }}
+
+            .earthquake-list {{
+                margin-top:15px;
+                padding:15px;
+                background:#f8f9fa;
+                color:#222;
+                border-radius:10px;
+                line-height:1.6;
             }}
 
             .warning {{
@@ -280,7 +469,7 @@ def index():
                 text-align:center;
                 padding:30vh 20px 0 20px;
                 box-sizing:border-box;
-                animation: flash 0.7s infinite;
+                animation:flash 0.7s infinite;
             }}
 
             .emergency-alert h1 {{
@@ -315,7 +504,9 @@ def index():
                     padding:12px;
                 }}
 
-                input, select, button {{
+                input,
+                select,
+                button {{
                     width:100%;
                     box-sizing:border-box;
                     margin:6px 0;
@@ -342,131 +533,252 @@ def index():
 
     <body>
 
-    <div id="emergencyAlert" class="emergency-alert">
-        <h1>🚨 ACİL DURUM</h1>
-        <p>Risk seviyesi kritik görünüyor.</p>
-        <p>Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin.</p>
-        <button class="close-alert" onclick="acilDurumKapat()">Uyarıyı Kapat</button>
-    </div>
+        <div
+            id="emergencyAlert"
+            class="emergency-alert"
+            role="alertdialog"
+            aria-live="assertive"
+        >
+            <h1>🚨 ACİL DURUM</h1>
 
-    <h1>ResiliCity: Afet Direnç Analiz Sistemi</h1>
-    <h2>🔴 Canlı Depremler: {deprem_ozeti}</h2>
+            <p>Risk seviyesi kritik görünüyor.</p>
 
-    <div class="box">
-        {map_html}
+            <p>
+                Güvenli alana geçin.
+                Asansör kullanmayın.
+                Toplanma alanına yönelin.
+            </p>
 
-        <div class="legend">
-            <b>Risk Seviyeleri:</b><br>
-            🟢 Düşük Risk<br>
-            🟡 Orta Risk<br>
-            🔴 Yüksek Risk
-        </div>
-    </div>
-
-    <div class="box">
-        <form method="POST">
-            <select name="sehir" required>
-                <option value="">Şehir seçiniz</option>
-                {sehir_options}
-            </select>
-
-            <br>
-
-            <input type="number" step="any" name="n" placeholder="Nüfus Yoğunluğu örn: 5000" required>
-            <input type="number" step="any" name="b" placeholder="Bina Yaşı örn: 20" required>
-            <input type="number" step="any" name="y" placeholder="Yatak Kapasitesi örn: 1000" required>
-            <input type="number" step="any" name="t" placeholder="Toplanma Alanı örn: 50000" required>
-            <input type="number" step="any" name="i" placeholder="İtfaiye Gücü örn: 50" required>
-            <input type="number" step="any" name="z" placeholder="Zemin Riski 1-10 örn: 7" required>
-
-            <br>
-            <button type="submit">Analiz Et</button>
-        </form>
-
-        <div class="example-box">
-            <b>📌 Örnek Değer Rehberi:</b><br><br>
-            • <b>Nüfus Yoğunluğu:</b> 5000 → yoğun şehirler için yüksek değer kabul edilir.<br>
-            • <b>Bina Yaşı:</b> 20 → bölgedeki ortalama bina yaşı gibi düşünülmelidir.<br>
-            • <b>Yatak Kapasitesi:</b> 1000 → hastane/acil durum kapasitesini temsil eder.<br>
-            • <b>Toplanma Alanı:</b> 50000 → m² cinsinden düşünülebilir; yüksek değer daha avantajlıdır.<br>
-            • <b>İtfaiye Gücü:</b> 50 → ekip, araç veya müdahale kapasitesi gibi düşünülebilir.<br>
-            • <b>Zemin Riski:</b> 1-10 arası girilir. 1 düşük risk, 10 çok yüksek risk anlamına gelir.
+            <button
+                class="close-alert"
+                onclick="acilDurumKapat()"
+            >
+                Uyarıyı Kapat
+            </button>
         </div>
 
-        <h2 style="color:{risk_rengi};">{tahmin_sonucu}</h2>
-        <p>{aciklama}</p>
+        <h1>ResiliCity: Afet Direnç Analiz Sistemi</h1>
 
-        {'''
-        <button type="button" onclick="acilDurumGoster()">
-            🚨 Erişilebilir Acil Durum Alarmını Test Et
-        </button>
-        ''' if acil_mod_aktif else ""}
+        <h2>
+            🔴 Canlı Depremler:
+            {deprem_ozeti}
+        </h2>
 
-        {f'''
-        <div class="suggestion-box">
-            <h3>🧭 Acil Durum Öneri Sistemi</h3>
-            <ul>{oneriler_html}</ul>
+        <div class="box">
+            {map_html}
+
+            <div class="legend">
+                <b>Risk Renkleri:</b><br>
+                🟢 1/5 → Güvenli Bölge<br>
+                🟡 2/5 → Düşük Risk<br>
+                🟠 3/5 → Orta Riskli<br>
+                🔴 4/5 → Yüksek Risk<br>
+                🟥 5/5 → Kritik / Çok Riskli
+            </div>
+
+            <div class="earthquake-list" aria-label="Canlı deprem listesi">
+                <h3>📋 Canlı Deprem Listesi</h3>
+                <ul>
+                    {deprem_listesi_html}
+                </ul>
+            </div>
         </div>
-        ''' if oneriler else ""}
 
-        <div class="accessibility-note">
-            <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
-            ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
-            ✅ Mobil cihazlarda titreşim desteği<br>
-            ✅ Görme engelli bireyler için Türkçe sesli yönlendirme<br>
-            ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
+        <div class="box">
+
+            <form method="POST">
+
+                <label for="sehir">Şehir Seçiniz</label>
+                <select id="sehir" name="sehir" required>
+                    <option value="">Şehir seçiniz</option>
+                    {sehir_options}
+                </select>
+
+                <label for="n">Nüfus Yoğunluğu</label>
+                <input
+                    id="n"
+                    type="number"
+                    step="any"
+                    name="n"
+                    placeholder="Örn: 5000"
+                    required
+                >
+
+                <label for="b">Bina Yaşı</label>
+                <input
+                    id="b"
+                    type="number"
+                    step="any"
+                    name="b"
+                    placeholder="Örn: 20"
+                    required
+                >
+
+                <label for="y">Yatak Kapasitesi</label>
+                <input
+                    id="y"
+                    type="number"
+                    step="any"
+                    name="y"
+                    placeholder="Örn: 1000"
+                    required
+                >
+
+                <label for="t">Toplanma Alanı</label>
+                <input
+                    id="t"
+                    type="number"
+                    step="any"
+                    name="t"
+                    placeholder="Örn: 50000"
+                    required
+                >
+
+                <label for="i">İtfaiye Gücü</label>
+                <input
+                    id="i"
+                    type="number"
+                    step="any"
+                    name="i"
+                    placeholder="Örn: 50"
+                    required
+                >
+
+                <label for="z">Zemin Riski</label>
+                <input
+                    id="z"
+                    type="number"
+                    step="any"
+                    name="z"
+                    min="1"
+                    max="10"
+                    placeholder="1-10 arası"
+                    required
+                >
+
+                <br><br>
+
+                <button type="submit">
+                    Analiz Et
+                </button>
+
+            </form>
+
+            <div class="example-box">
+                <b>📌 Örnek Değer Rehberi:</b><br><br>
+                • <b>Nüfus Yoğunluğu:</b> 5000 → yoğun şehirler için yüksek değer kabul edilir.<br>
+                • <b>Bina Yaşı:</b> 20 → bölgedeki ortalama bina yaşı gibi düşünülmelidir.<br>
+                • <b>Yatak Kapasitesi:</b> 1000 → hastane/acil durum kapasitesini temsil eder.<br>
+                • <b>Toplanma Alanı:</b> 50000 → m² cinsinden düşünülebilir; yüksek değer daha avantajlıdır.<br>
+                • <b>İtfaiye Gücü:</b> 50 → ekip, araç veya müdahale kapasitesi gibi düşünülebilir.<br>
+                • <b>Zemin Riski:</b> 1-10 arası girilir. 1 düşük risk, 10 çok yüksek risk anlamına gelir.
+            </div>
+
+            <h2
+                style="color:{risk_rengi};"
+                aria-live="assertive"
+                role="alert"
+            >
+                {tahmin_sonucu}
+            </h2>
+
+            {f'''
+            <div class="risk-score-box">
+                Risk Skoru: {risk_skoru}/5
+            </div>
+            ''' if risk_skoru > 0 else ""}
+
+            <p>{aciklama}</p>
+
+            <button
+                type="button"
+                onclick="acilDurumGoster()"
+            >
+                🚨 Erişilebilir Acil Durum Alarmını Test Et
+            </button>
+
+            {f'''
+            <div class="suggestion-box">
+                <h3>🧭 Acil Durum Öneri Sistemi</h3>
+                <ul>{oneriler_html}</ul>
+            </div>
+            ''' if oneriler else ""}
+
+            <div class="accessibility-note">
+                <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
+                ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
+                ✅ Mobil cihazlarda titreşim desteği<br>
+                ✅ Görme engelli bireyler için Türkçe sesli yönlendirme<br>
+                ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
+                ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
+                ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Zemin Uyarısı:</strong><br>
+                Yumuşak zeminler deprem etkisini büyütür.
+            </div>
+
         </div>
 
-        <div class="warning">
-            <strong>⚠️ Zemin Uyarısı:</strong><br>
-            Yumuşak zeminler deprem etkisini büyütür.
-        </div>
-    </div>
-
-    <script>
-        if ("serviceWorker" in navigator) {{
-            navigator.serviceWorker.register("/static/service-worker.js")
-            .then(() => console.log("Service Worker kayıt edildi."))
-            .catch(error => console.log("Service Worker hatası:", error));
-        }}
-
-        function sesliUyariVer() {{
-            if ("speechSynthesis" in window) {{
-                const mesaj = new SpeechSynthesisUtterance(
-                    "Dikkat. Kritik risk tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
-                );
-
-                mesaj.lang = "tr-TR";
-                mesaj.rate = 0.9;
-
-                window.speechSynthesis.cancel();
-                window.speechSynthesis.speak(mesaj);
+        <script>
+            if ("serviceWorker" in navigator) {{
+                navigator.serviceWorker.register("/static/service-worker.js")
+                .then(() => console.log("Service Worker kayıt edildi."))
+                .catch(error => console.log("Service Worker hatası:", error));
             }}
-        }}
 
-        function acilDurumGoster() {{
-            const alertBox = document.getElementById("emergencyAlert");
-            alertBox.style.display = "block";
+            function sesliUyariVer() {{
+                if ("speechSynthesis" in window) {{
+                    const mesaj = new SpeechSynthesisUtterance(
+                        "Dikkat. Kritik risk tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
+                    );
 
-            if (navigator.vibrate) {{
-                navigator.vibrate([500, 300, 500, 300, 1000]);
+                    mesaj.lang = "tr-TR";
+                    mesaj.rate = 0.9;
+                    mesaj.pitch = 1;
+
+                    window.speechSynthesis.cancel();
+
+                    setTimeout(() => {{
+                        window.speechSynthesis.speak(mesaj);
+                    }}, 200);
+                }}
             }}
 
-            sesliUyariVer();
-        }}
+            function acilDurumGoster() {{
+                const alertBox = document.getElementById("emergencyAlert");
+                alertBox.style.display = "block";
 
-        function acilDurumKapat() {{
-            document.getElementById("emergencyAlert").style.display = "none";
+                if (navigator.vibrate) {{
+                    navigator.vibrate([500, 300, 500, 300, 1000]);
+                }}
 
-            if (navigator.vibrate) {{
-                navigator.vibrate(0);
+                sesliUyariVer();
             }}
 
-            if ("speechSynthesis" in window) {{
-                window.speechSynthesis.cancel();
+            function acilDurumKapat() {{
+                document.getElementById("emergencyAlert").style.display = "none";
+
+                if (navigator.vibrate) {{
+                    navigator.vibrate(0);
+                }}
+
+                if ("speechSynthesis" in window) {{
+                    window.speechSynthesis.cancel();
+                }}
             }}
-        }}
-    </script>
+
+            window.onload = function () {{
+                const kritikMi = "{risk_durumu}" === "Kritik / Riskli";
+
+                if (kritikMi) {{
+                    setTimeout(() => {{
+                        acilDurumGoster();
+                    }}, 1000);
+                }}
+            }};
+        </script>
 
     </body>
     </html>

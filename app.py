@@ -943,13 +943,7 @@ def index():
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
             </div>
-
-            <div class="warning">
-                <strong>⚠️ Zemin Uyarısı:</strong><br>
-                Yumuşak zeminler deprem etkisini büyütür.
-            </div>
-
-        </div>
+</div>
 
         <script>
             if ("serviceWorker" in navigator) {{

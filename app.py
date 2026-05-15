@@ -14,6 +14,7 @@ base = os.path.dirname(os.path.abspath(__file__))
 data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
 geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
+ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
 
 
 def normalize_text(text):
@@ -254,7 +255,9 @@ def index():
     risk_skoru = 0
     aciklama = ""
     secilen_sehir = ""
+    secilen_ilce = ""
     sehirler = []
+    ilce_verileri = {}
     oneriler = []
     deprem_alarm_var = False
     alarm_mesaji = ""
@@ -263,17 +266,29 @@ def index():
         df = pd.read_csv(data_yolu)
         sehirler = sorted(df["Sehir"].dropna().unique())
 
-    son_depremler = canlı_depremleri_getir()
+    # İlçe CSV dosyası sonra eklenecek. Dosya yoksa sistem bozulmadan çalışır.
+    if os.path.exists(ilce_yolu):
+        try:
+            ilce_df = pd.read_csv(ilce_yolu)
 
-    # Canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
-    son_depremler = [
-        d for d in son_depremler
+            if "Sehir" in ilce_df.columns and "Ilce" in ilce_df.columns:
+                for sehir, grup in ilce_df.groupby("Sehir"):
+                    ilce_verileri[sehir] = sorted(grup["Ilce"].dropna().unique().tolist())
+
+        except Exception as e:
+            print("İlçe CSV okuma hatası:", e)
+
+    tum_depremler = canlı_depremleri_getir()
+
+    # Üst canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
+    ust_depremler = [
+        d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4
     ]
 
     # Alarm, analiz sonucuna göre değil; canlı deprem verisinde kritik eşik aşılırsa çalışır.
     kritik_depremler = [
-        d for d in son_depremler
+        d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4.5
     ]
 
@@ -285,9 +300,9 @@ def index():
             f"{en_kritik.get('mag', '?')} büyüklüğünde deprem tespit edildi."
         )
 
-    if son_depremler:
+    if ust_depremler:
         deprem_ozeti = " | ".join(
-            [f"{d.get('title', '?')} ({d.get('mag', '?')})" for d in son_depremler[:5]]
+            [f"{d.get('title', '?')} ({d.get('mag', '?')})" for d in ust_depremler[:5]]
         )
     else:
         deprem_ozeti = "Son 4+ büyüklüğünde deprem bulunamadı."
@@ -295,6 +310,7 @@ def index():
     if request.method == "POST":
         try:
             secilen_sehir = request.form.get("sehir", "")
+            secilen_ilce = request.form.get("ilce", "")
 
             inputs = [
                 float(request.form.get(x, 0))
@@ -326,7 +342,12 @@ def index():
                 tahmin_sonucu = risk_durumu
 
                 if secilen_sehir:
-                    tahmin_sonucu = f"{secilen_sehir} için sonuç: {risk_durumu}"
+                    konum_metni = secilen_sehir
+
+                    if secilen_ilce:
+                        konum_metni = f"{secilen_sehir} / {secilen_ilce}"
+
+                    tahmin_sonucu = f"{konum_metni} için sonuç: {risk_durumu}"
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
 
@@ -372,7 +393,7 @@ def index():
         risk_durumu
     )
 
-    for d in son_depremler:
+    for d in tum_depremler:
         try:
             lon, lat = d["geojson"]["coordinates"]
             mag = float(d["mag"])
@@ -400,15 +421,26 @@ def index():
         selected = "selected" if sehir == secilen_sehir else ""
         sehir_options += f'<option value="{sehir}" {selected}>{sehir}</option>'
 
+    ilce_options = '<option value="">Önce şehir seçiniz</option>'
+
+    if secilen_sehir and secilen_sehir in ilce_verileri:
+        ilce_options = '<option value="">İlçe seçiniz</option>'
+
+        for ilce in ilce_verileri[secilen_sehir]:
+            selected = "selected" if ilce == secilen_ilce else ""
+            ilce_options += f'<option value="{ilce}" {selected}>{ilce}</option>'
+
+    ilce_verileri_json = json.dumps(ilce_verileri, ensure_ascii=False)
+
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
-    if son_depremler:
+    if tum_depremler:
         deprem_listesi_html = "".join([
             f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
-            for d in son_depremler[:5]
+            for d in tum_depremler[:15]
         ])
     else:
-        deprem_listesi_html = "<li>4.0 ve üzeri güncel deprem bulunamadı.</li>"
+        deprem_listesi_html = "<li>Güncel deprem verisi alınamadı.</li>"
 
     html = f"""
     <!DOCTYPE html>
@@ -636,10 +668,10 @@ def index():
             </button>
         </div>
 
-        <h1>ResiliCity: Afet Direnç Analiz Sistemi</h1>
+        <h1>RiskAtlas: AI Destekli Afet Risk Analiz Platformu</h1>
 
         <h2>
-            🔴 Canlı Depremler:
+            🔴 4.0+ Canlı Deprem Uyarıları:
             {deprem_ozeti}
         </h2>
 
@@ -656,7 +688,7 @@ def index():
             </div>
 
             <div class="earthquake-list" aria-label="Canlı deprem listesi">
-                <h3>📋 Canlı Deprem Listesi</h3>
+                <h3>📋 Tüm Güncel Deprem Listesi</h3>
                 <ul>
                     {deprem_listesi_html}
                 </ul>
@@ -668,9 +700,14 @@ def index():
             <form method="POST">
 
                 <label for="sehir">Şehir Seçiniz</label>
-                <select id="sehir" name="sehir" required>
+                <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
                     <option value="">Şehir seçiniz</option>
                     {sehir_options}
+                </select>
+
+                <label for="ilce">İlçe Seçiniz</label>
+                <select id="ilce" name="ilce">
+                    {ilce_options}
                 </select>
 
                 <label for="n">Nüfus Yoğunluğu</label>
@@ -807,10 +844,46 @@ def index():
                 .catch(error => console.log("Service Worker hatası:", error));
             }}
 
+            const ilceVerileri = {ilce_verileri_json};
+
+            function ilceleriGuncelle() {{
+                const sehirSelect = document.getElementById("sehir");
+                const ilceSelect = document.getElementById("ilce");
+
+                if (!sehirSelect || !ilceSelect) {{
+                    return;
+                }}
+
+                const secilenSehir = sehirSelect.value;
+                const ilceler = ilceVerileri[secilenSehir] || [];
+
+                ilceSelect.innerHTML = "";
+
+                if (ilceler.length === 0) {{
+                    const option = document.createElement("option");
+                    option.value = "";
+                    option.textContent = "İlçe verisi bulunamadı";
+                    ilceSelect.appendChild(option);
+                    return;
+                }}
+
+                const ilkOption = document.createElement("option");
+                ilkOption.value = "";
+                ilkOption.textContent = "İlçe seçiniz";
+                ilceSelect.appendChild(ilkOption);
+
+                ilceler.forEach(function(ilce) {{
+                    const option = document.createElement("option");
+                    option.value = ilce;
+                    option.textContent = ilce;
+                    ilceSelect.appendChild(option);
+                }});
+            }}
+
             function sesliUyariVer() {{
                 if ("speechSynthesis" in window) {{
                     const mesaj = new SpeechSynthesisUtterance(
-                        "Dikkat. Kritik risk tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
+                        "Dikkat. Canlı deprem verisinde kritik seviyede deprem tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
                     );
 
                     mesaj.lang = "tr-TR";

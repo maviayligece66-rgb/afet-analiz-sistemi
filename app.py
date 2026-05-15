@@ -22,18 +22,69 @@ def normalize_text(text):
     return ''.join(c for c in text if not unicodedata.combining(c))
 
 
-def canlı_depremleri_getir():
+def afad_depremleri_getir():
     try:
-        url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
-        r = requests.get(url, timeout=5)
+        url = "https://deprem.afad.gov.tr/apiv2/event/latest"
+        r = requests.get(url, timeout=8)
 
         if r.status_code == 200:
-            return r.json().get("result", [])[:15]
+            veriler = r.json()
+            depremler = []
+
+            for d in veriler[:30]:
+                try:
+                    mag = float(d.get("magnitude", 0))
+                    lat = float(d.get("latitude", 0))
+                    lon = float(d.get("longitude", 0))
+
+                    depremler.append({
+                        "kaynak": "AFAD",
+                        "title": d.get("location", "Bilinmeyen Konum"),
+                        "mag": mag,
+                        "date": d.get("date", ""),
+                        "geojson": {
+                            "coordinates": [lon, lat]
+                        }
+                    })
+
+                except Exception:
+                    continue
+
+            return depremler
 
     except Exception as e:
-        print("Deprem API hatası:", e)
+        print("AFAD API hatası:", e)
 
     return []
+
+
+def kandilli_depremleri_getir():
+    try:
+        url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+        r = requests.get(url, timeout=8)
+
+        if r.status_code == 200:
+            depremler = r.json().get("result", [])
+
+            for d in depremler:
+                d["kaynak"] = "Kandilli"
+
+            return depremler[:30]
+
+    except Exception as e:
+        print("Kandilli API hatası:", e)
+
+    return []
+
+
+def canlı_depremleri_getir():
+    # Önce AFAD verisi alınır. AFAD çalışmazsa Kandilli yedek kaynak olarak kullanılır.
+    afad = afad_depremleri_getir()
+
+    if afad:
+        return afad
+
+    return kandilli_depremleri_getir()
 
 
 def acil_oneriler_uret(risk_durumu, inputs):
@@ -205,6 +256,8 @@ def index():
     secilen_sehir = ""
     sehirler = []
     oneriler = []
+    deprem_alarm_var = False
+    alarm_mesaji = ""
 
     if os.path.exists(data_yolu):
         df = pd.read_csv(data_yolu)
@@ -212,9 +265,32 @@ def index():
 
     son_depremler = canlı_depremleri_getir()
 
-    deprem_ozeti = " | ".join(
-        [f"{d.get('title', '?')} ({d.get('mag', '?')})" for d in son_depremler[:5]]
-    )
+    # Canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
+    son_depremler = [
+        d for d in son_depremler
+        if float(d.get("mag", 0)) >= 4
+    ]
+
+    # Alarm, analiz sonucuna göre değil; canlı deprem verisinde kritik eşik aşılırsa çalışır.
+    kritik_depremler = [
+        d for d in son_depremler
+        if float(d.get("mag", 0)) >= 4.5
+    ]
+
+    if kritik_depremler:
+        deprem_alarm_var = True
+        en_kritik = kritik_depremler[0]
+        alarm_mesaji = (
+            f"{en_kritik.get('title', 'Bilinmeyen Konum')} bölgesinde "
+            f"{en_kritik.get('mag', '?')} büyüklüğünde deprem tespit edildi."
+        )
+
+    if son_depremler:
+        deprem_ozeti = " | ".join(
+            [f"{d.get('title', '?')} ({d.get('mag', '?')})" for d in son_depremler[:5]]
+        )
+    else:
+        deprem_ozeti = "Son 4+ büyüklüğünde deprem bulunamadı."
 
     if request.method == "POST":
         try:
@@ -326,10 +402,13 @@ def index():
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
-    deprem_listesi_html = "".join([
-        f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')}</li>"
-        for d in son_depremler[:5]
-    ])
+    if son_depremler:
+        deprem_listesi_html = "".join([
+            f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
+            for d in son_depremler[:5]
+        ])
+    else:
+        deprem_listesi_html = "<li>4.0 ve üzeri güncel deprem bulunamadı.</li>"
 
     html = f"""
     <!DOCTYPE html>
@@ -541,7 +620,7 @@ def index():
         >
             <h1>🚨 ACİL DURUM</h1>
 
-            <p>Risk seviyesi kritik görünüyor.</p>
+            <p>{alarm_mesaji if alarm_mesaji else "Canlı deprem verisi kritik seviyeye ulaştı."}</p>
 
             <p>
                 Güvenli alana geçin.
@@ -770,9 +849,9 @@ def index():
             }}
 
             window.onload = function () {{
-                const kritikMi = "{risk_durumu}" === "Kritik / Riskli";
+                const depremAlarmVar = "{deprem_alarm_var}" === "True";
 
-                if (kritikMi) {{
+                if (depremAlarmVar) {{
                     setTimeout(() => {{
                         acilDurumGoster();
                     }}, 1000);

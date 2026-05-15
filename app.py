@@ -15,6 +15,7 @@ data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
 geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
 ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
+zemin_yolu = os.path.join(base, 'datasets', 'zemin_verileri.csv')
 
 
 def normalize_text(text):
@@ -86,6 +87,54 @@ def canlı_depremleri_getir():
         return afad
 
     return kandilli_depremleri_getir()
+
+
+def zemin_bilgisi_getir(zemin_df, sehir, ilce="", mahalle=""):
+    """
+    Zemin verisi CSV dosyasından şehir/ilçe/mahalle bilgisine göre zemin bilgisini getirir.
+    CSV yoksa veya eşleşme bulunamazsa varsayılan orta risk değeri kullanılır.
+    Beklenen CSV kolonları:
+    Sehir, Ilce, Mahalle, Zemin_Tipi, Zemin_Riski, Zemin_Aciklama
+    """
+    varsayilan = {
+        "tip": "Zemin verisi bulunamadı",
+        "risk": 5,
+        "aciklama": "Bu bölge için kayıtlı zemin verisi bulunamadığı için analizde varsayılan orta düzey zemin riski kullanılmıştır."
+    }
+
+    if zemin_df is None or zemin_df.empty or not sehir:
+        return varsayilan
+
+    try:
+        df = zemin_df.copy()
+
+        if "Sehir" in df.columns:
+            df = df[df["Sehir"].apply(normalize_text) == normalize_text(sehir)]
+
+        if ilce and "Ilce" in df.columns:
+            ilce_eslesme = df[df["Ilce"].apply(normalize_text) == normalize_text(ilce)]
+            if not ilce_eslesme.empty:
+                df = ilce_eslesme
+
+        if mahalle and "Mahalle" in df.columns:
+            mahalle_eslesme = df[df["Mahalle"].apply(normalize_text) == normalize_text(mahalle)]
+            if not mahalle_eslesme.empty:
+                df = mahalle_eslesme
+
+        if df.empty:
+            return varsayilan
+
+        satir = df.iloc[0]
+
+        return {
+            "tip": satir.get("Zemin_Tipi", "Belirtilmemiş"),
+            "risk": float(satir.get("Zemin_Riski", 5)),
+            "aciklama": satir.get("Zemin_Aciklama", "Bu bölgenin zemin bilgisi veri setinden alınmıştır.")
+        }
+
+    except Exception as e:
+        print("Zemin bilgisi okuma hatası:", e)
+        return varsayilan
 
 
 def acil_oneriler_uret(risk_durumu, inputs):
@@ -256,8 +305,12 @@ def index():
     aciklama = ""
     secilen_sehir = ""
     secilen_ilce = ""
+    secilen_mahalle = ""
     sehirler = []
     ilce_verileri = {}
+    mahalle_verileri = {}
+    zemin_df = None
+    zemin_bilgisi = None
     oneriler = []
     deprem_alarm_var = False
     alarm_mesaji = ""
@@ -277,6 +330,25 @@ def index():
 
         except Exception as e:
             print("İlçe CSV okuma hatası:", e)
+
+    # Zemin CSV dosyası sonra eklenecek. Dosya yoksa sistem varsayılan zemin riskiyle çalışır.
+    if os.path.exists(zemin_yolu):
+        try:
+            zemin_df = pd.read_csv(zemin_yolu)
+
+            if "Sehir" in zemin_df.columns and "Ilce" in zemin_df.columns:
+                for sehir, grup in zemin_df.groupby("Sehir"):
+                    mevcut_ilceler = set(ilce_verileri.get(sehir, []))
+                    yeni_ilceler = set(grup["Ilce"].dropna().unique().tolist())
+                    ilce_verileri[sehir] = sorted(list(mevcut_ilceler.union(yeni_ilceler)))
+
+            if all(kolon in zemin_df.columns for kolon in ["Sehir", "Ilce", "Mahalle"]):
+                for (sehir, ilce), grup in zemin_df.groupby(["Sehir", "Ilce"]):
+                    anahtar = f"{sehir}|||{ilce}"
+                    mahalle_verileri[anahtar] = sorted(grup["Mahalle"].dropna().unique().tolist())
+
+        except Exception as e:
+            print("Zemin CSV okuma hatası:", e)
 
     tum_depremler = canlı_depremleri_getir()
 
@@ -311,11 +383,23 @@ def index():
         try:
             secilen_sehir = request.form.get("sehir", "")
             secilen_ilce = request.form.get("ilce", "")
+            secilen_mahalle = request.form.get("mahalle", "")
+
+            zemin_bilgisi = zemin_bilgisi_getir(
+                zemin_df,
+                secilen_sehir,
+                secilen_ilce,
+                secilen_mahalle
+            )
+
+            zemin_riski = float(zemin_bilgisi.get("risk", 5))
 
             inputs = [
                 float(request.form.get(x, 0))
-                for x in ['n', 'b', 'y', 't', 'i', 'z']
+                for x in ['n', 'b', 'y', 't', 'i']
             ]
+
+            inputs.append(zemin_riski)
 
             if os.path.exists(model_yolu):
                 model = joblib.load(model_yolu)
@@ -346,6 +430,9 @@ def index():
 
                     if secilen_ilce:
                         konum_metni = f"{secilen_sehir} / {secilen_ilce}"
+
+                    if secilen_mahalle:
+                        konum_metni = f"{konum_metni} / {secilen_mahalle}"
 
                     tahmin_sonucu = f"{konum_metni} için sonuç: {risk_durumu}"
 
@@ -430,7 +517,32 @@ def index():
             selected = "selected" if ilce == secilen_ilce else ""
             ilce_options += f'<option value="{ilce}" {selected}>{ilce}</option>'
 
+    mahalle_options = '<option value="">Önce ilçe seçiniz</option>'
+
+    if secilen_sehir and secilen_ilce:
+        mahalle_anahtar = f"{secilen_sehir}|||{secilen_ilce}"
+
+        if mahalle_anahtar in mahalle_verileri:
+            mahalle_options = '<option value="">Mahalle seçiniz</option>'
+
+            for mahalle in mahalle_verileri[mahalle_anahtar]:
+                selected = "selected" if mahalle == secilen_mahalle else ""
+                mahalle_options += f'<option value="{mahalle}" {selected}>{mahalle}</option>'
+
     ilce_verileri_json = json.dumps(ilce_verileri, ensure_ascii=False)
+    mahalle_verileri_json = json.dumps(mahalle_verileri, ensure_ascii=False)
+
+    if zemin_bilgisi:
+        zemin_bilgisi_html = f"""
+            <div class="zemin-info-box">
+                <h3>🌍 Zemin Bilgisi</h3>
+                <p><b>Zemin Türü:</b> {zemin_bilgisi.get('tip', 'Belirtilmemiş')}</p>
+                <p><b>Tahmini Zemin Riski:</b> {zemin_bilgisi.get('risk', '?')}/10</p>
+                <p>{zemin_bilgisi.get('aciklama', '')}</p>
+            </div>
+        """
+    else:
+        zemin_bilgisi_html = ""
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
@@ -490,6 +602,23 @@ def index():
                 font-weight:bold;
             }}
 
+            small {{
+                display:block;
+                color:#555;
+                margin:0 5px 8px 5px;
+                line-height:1.4;
+            }}
+
+            .zemin-info-box {{
+                margin-top:15px;
+                padding:15px;
+                background:#eef7ff;
+                color:#0b3954;
+                border-left:6px solid #3498db;
+                border-radius:10px;
+                line-height:1.5;
+            }}
+
             button {{
                 padding:12px;
                 background:#c31432;
@@ -498,15 +627,6 @@ def index():
                 border-radius:8px;
                 cursor:pointer;
                 font-weight:bold;
-            }}
-
-            .legend {{
-                margin-top:15px;
-                background:white;
-                padding:12px;
-                border-radius:10px;
-                color:black;
-                line-height:1.7;
             }}
 
             .risk-score-box {{
@@ -678,15 +798,6 @@ def index():
         <div class="box">
             {map_html}
 
-            <div class="legend">
-                <b>Risk Renkleri:</b><br>
-                🟢 1/5 → Güvenli Bölge<br>
-                🟡 2/5 → Düşük Risk<br>
-                🟠 3/5 → Orta Riskli<br>
-                🔴 4/5 → Yüksek Risk<br>
-                🟥 5/5 → Kritik / Çok Riskli
-            </div>
-
             <div class="earthquake-list" aria-label="Canlı deprem listesi">
                 <h3>📋 Tüm Güncel Deprem Listesi</h3>
                 <ul>
@@ -700,25 +811,33 @@ def index():
             <form method="POST">
 
                 <label for="sehir">Şehir Seçiniz</label>
-                <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
+                <select id="sehir" name="sehir" required onchange="ilceleriGuncelle(); mahalleleriGuncelle();">
                     <option value="">Şehir seçiniz</option>
                     {sehir_options}
                 </select>
 
                 <label for="ilce">İlçe Seçiniz</label>
-                <select id="ilce" name="ilce">
+                <select id="ilce" name="ilce" onchange="mahalleleriGuncelle()">
                     {ilce_options}
                 </select>
 
-                <label for="n">Nüfus Yoğunluğu</label>
+                <label for="mahalle">Mahalle Seçiniz</label>
+                <select id="mahalle" name="mahalle">
+                    {mahalle_options}
+                </select>
+
+                <label for="n">Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu</label>
                 <input
                     id="n"
                     type="number"
                     step="any"
                     name="n"
-                    placeholder="Örn: 5000"
+                    placeholder="Örn: 5000 kişi/km²"
                     required
                 >
+                <small>
+                    Bu değer binada yaşayan kişi sayısını değil, bulunduğunuz mahalle veya ilçedeki genel nüfus yoğunluğunu temsil eder.
+                </small>
 
                 <label for="b">Bina Yaşı</label>
                 <input
@@ -760,17 +879,10 @@ def index():
                     required
                 >
 
-                <label for="z">Zemin Riski</label>
-                <input
-                    id="z"
-                    type="number"
-                    step="any"
-                    name="z"
-                    min="1"
-                    max="10"
-                    placeholder="1-10 arası"
-                    required
-                >
+                <div class="zemin-info-box">
+                    <b>🌍 Zemin Riski:</b><br>
+                    Zemin riski kullanıcıdan istenmez. Seçilen şehir, ilçe ve mahalle bilgisine göre sistem tarafından otomatik değerlendirilir.
+                </div>
 
                 <br><br>
 
@@ -782,12 +894,12 @@ def index():
 
             <div class="example-box">
                 <b>📌 Örnek Değer Rehberi:</b><br><br>
-                • <b>Nüfus Yoğunluğu:</b> 5000 → yoğun şehirler için yüksek değer kabul edilir.<br>
+                • <b>Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu:</b> 5000 kişi/km² → bulunduğunuz mahalle veya ilçedeki genel yoğunluğu temsil eder.<br>
                 • <b>Bina Yaşı:</b> 20 → bölgedeki ortalama bina yaşı gibi düşünülmelidir.<br>
                 • <b>Yatak Kapasitesi:</b> 1000 → hastane/acil durum kapasitesini temsil eder.<br>
                 • <b>Toplanma Alanı:</b> 50000 → m² cinsinden düşünülebilir; yüksek değer daha avantajlıdır.<br>
                 • <b>İtfaiye Gücü:</b> 50 → ekip, araç veya müdahale kapasitesi gibi düşünülebilir.<br>
-                • <b>Zemin Riski:</b> 1-10 arası girilir. 1 düşük risk, 10 çok yüksek risk anlamına gelir.
+                • <b>Zemin Riski:</b> kullanıcı tarafından girilmez; seçilen bölgeye göre sistem tarafından otomatik kullanılır.
             </div>
 
             <h2
@@ -803,6 +915,8 @@ def index():
                 Risk Skoru: {risk_skoru}/5
             </div>
             ''' if risk_skoru > 0 else ""}
+
+            {zemin_bilgisi_html}
 
             <p>{aciklama}</p>
 
@@ -845,6 +959,7 @@ def index():
             }}
 
             const ilceVerileri = {ilce_verileri_json};
+            const mahalleVerileri = {mahalle_verileri_json};
 
             function ilceleriGuncelle() {{
                 const sehirSelect = document.getElementById("sehir");
@@ -877,6 +992,43 @@ def index():
                     option.value = ilce;
                     option.textContent = ilce;
                     ilceSelect.appendChild(option);
+                }});
+
+                mahalleleriGuncelle();
+            }}
+
+            function mahalleleriGuncelle() {{
+                const sehirSelect = document.getElementById("sehir");
+                const ilceSelect = document.getElementById("ilce");
+                const mahalleSelect = document.getElementById("mahalle");
+
+                if (!sehirSelect || !ilceSelect || !mahalleSelect) {{
+                    return;
+                }}
+
+                const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
+                const mahalleler = mahalleVerileri[anahtar] || [];
+
+                mahalleSelect.innerHTML = "";
+
+                if (mahalleler.length === 0) {{
+                    const option = document.createElement("option");
+                    option.value = "";
+                    option.textContent = "Mahalle verisi bulunamadı";
+                    mahalleSelect.appendChild(option);
+                    return;
+                }}
+
+                const ilkOption = document.createElement("option");
+                ilkOption.value = "";
+                ilkOption.textContent = "Mahalle seçiniz";
+                mahalleSelect.appendChild(ilkOption);
+
+                mahalleler.forEach(function(mahalle) {{
+                    const option = document.createElement("option");
+                    option.value = mahalle;
+                    option.textContent = mahalle;
+                    mahalleSelect.appendChild(option);
                 }});
             }}
 

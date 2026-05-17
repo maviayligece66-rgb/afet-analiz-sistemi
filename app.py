@@ -6,12 +6,14 @@ import folium
 import requests
 import json
 import unicodedata
+import sqlite3
 
 app = Flask(__name__)
 
 base = os.path.dirname(os.path.abspath(__file__))
 
 data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
+db_yolu = os.path.join(base, 'datasets', 'afet_veritabani.db')
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
 geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
 ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
@@ -315,14 +317,34 @@ def index():
     deprem_alarm_var = False
     alarm_mesaji = ""
 
-    if os.path.exists(data_yolu):
-        df = pd.read_csv(data_yolu)
-        sehirler = sorted(df["Sehir"].dropna().unique())
+    # Şehir listesi önce SQLite veritabanından alınır.
+    # Veritabanı yoksa eski CSV dosyası yedek olarak kullanılır.
+    if os.path.exists(db_yolu):
+        try:
+            conn = sqlite3.connect(db_yolu)
+            df = pd.read_sql_query("SELECT * FROM afet_verileri", conn)
+            conn.close()
+
+            if "Sehir" in df.columns:
+                sehirler = sorted(df["Sehir"].dropna().unique().tolist())
+
+        except Exception as e:
+            print("Veritabanı okuma hatası:", e)
+
+    elif os.path.exists(data_yolu):
+        try:
+            df = pd.read_csv(data_yolu, encoding="utf-8-sig")
+
+            if "Sehir" in df.columns:
+                sehirler = sorted(df["Sehir"].dropna().unique().tolist())
+
+        except Exception as e:
+            print("CSV veri okuma hatası:", e)
 
     # İlçe CSV dosyası sonra eklenecek. Dosya yoksa sistem bozulmadan çalışır.
     if os.path.exists(ilce_yolu):
         try:
-            ilce_df = pd.read_csv(ilce_yolu)
+            ilce_df = pd.read_csv(ilce_yolu, encoding="utf-8-sig")
 
             if "Sehir" in ilce_df.columns and "Ilce" in ilce_df.columns:
                 for sehir, grup in ilce_df.groupby("Sehir"):
@@ -334,7 +356,7 @@ def index():
     # Zemin CSV dosyası sonra eklenecek. Dosya yoksa sistem varsayılan zemin riskiyle çalışır.
     if os.path.exists(zemin_yolu):
         try:
-            zemin_df = pd.read_csv(zemin_yolu)
+            zemin_df = pd.read_csv(zemin_yolu, encoding="utf-8-sig")
 
             if "Sehir" in zemin_df.columns and "Ilce" in zemin_df.columns:
                 for sehir, grup in zemin_df.groupby("Sehir"):
@@ -349,6 +371,16 @@ def index():
 
         except Exception as e:
             print("Zemin CSV okuma hatası:", e)
+
+    # Şehir listesi yalnızca model/veritabanı verisinden gelirse 81 ilin tamamı görünmeyebilir.
+    # Bu nedenle ilçe ve zemin CSV dosyalarındaki şehirler de listeye eklenir.
+    tum_sehirler = set(sehirler)
+    tum_sehirler.update(ilce_verileri.keys())
+
+    if zemin_df is not None and not zemin_df.empty and "Sehir" in zemin_df.columns:
+        tum_sehirler.update(zemin_df["Sehir"].dropna().unique().tolist())
+
+    sehirler = sorted(tum_sehirler)
 
     tum_depremler = canlı_depremleri_getir()
 
@@ -811,7 +843,7 @@ def index():
             <form method="POST">
 
                 <label for="sehir">Şehir Seçiniz</label>
-                <select id="sehir" name="sehir" required onchange="ilceleriGuncelle(); mahalleleriGuncelle();">
+                <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
                     <option value="">Şehir seçiniz</option>
                     {sehir_options}
                 </select>
@@ -958,6 +990,7 @@ def index():
             function ilceleriGuncelle() {{
                 const sehirSelect = document.getElementById("sehir");
                 const ilceSelect = document.getElementById("ilce");
+                const mahalleSelect = document.getElementById("mahalle");
 
                 if (!sehirSelect || !ilceSelect) {{
                     return;
@@ -967,6 +1000,22 @@ def index():
                 const ilceler = ilceVerileri[secilenSehir] || [];
 
                 ilceSelect.innerHTML = "";
+
+                if (mahalleSelect) {{
+                    mahalleSelect.innerHTML = "";
+                    const mahalleOption = document.createElement("option");
+                    mahalleOption.value = "";
+                    mahalleOption.textContent = "Önce ilçe seçiniz";
+                    mahalleSelect.appendChild(mahalleOption);
+                }}
+
+                if (!secilenSehir) {{
+                    const option = document.createElement("option");
+                    option.value = "";
+                    option.textContent = "Önce şehir seçiniz";
+                    ilceSelect.appendChild(option);
+                    return;
+                }}
 
                 if (ilceler.length === 0) {{
                     const option = document.createElement("option");
@@ -987,8 +1036,6 @@ def index():
                     option.textContent = ilce;
                     ilceSelect.appendChild(option);
                 }});
-
-                mahalleleriGuncelle();
             }}
 
             function mahalleleriGuncelle() {{

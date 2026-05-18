@@ -26,6 +26,11 @@ def normalize_text(text):
     return ''.join(c for c in text if not unicodedata.combining(c))
 
 
+def turkce_sirala(liste):
+    """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
+    return sorted(liste, key=lambda x: normalize_text(x))
+
+
 def afad_depremleri_getir():
     try:
         url = "https://deprem.afad.gov.tr/apiv2/event/latest"
@@ -326,7 +331,7 @@ def index():
             conn.close()
 
             if "Sehir" in df.columns:
-                sehirler = sorted(df["Sehir"].dropna().unique().tolist())
+                sehirler = turkce_sirala(df["Sehir"].dropna().unique().tolist())
 
         except Exception as e:
             print("Veritabanı okuma hatası:", e)
@@ -336,7 +341,7 @@ def index():
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
 
             if "Sehir" in df.columns:
-                sehirler = sorted(df["Sehir"].dropna().unique().tolist())
+                sehirler = turkce_sirala(df["Sehir"].dropna().unique().tolist())
 
         except Exception as e:
             print("CSV veri okuma hatası:", e)
@@ -348,7 +353,7 @@ def index():
 
             if "Sehir" in ilce_df.columns and "Ilce" in ilce_df.columns:
                 for sehir, grup in ilce_df.groupby("Sehir"):
-                    ilce_verileri[sehir] = sorted(grup["Ilce"].dropna().unique().tolist())
+                    ilce_verileri[sehir] = turkce_sirala(grup["Ilce"].dropna().unique().tolist())
 
         except Exception as e:
             print("İlçe CSV okuma hatası:", e)
@@ -362,12 +367,12 @@ def index():
                 for sehir, grup in zemin_df.groupby("Sehir"):
                     mevcut_ilceler = set(ilce_verileri.get(sehir, []))
                     yeni_ilceler = set(grup["Ilce"].dropna().unique().tolist())
-                    ilce_verileri[sehir] = sorted(list(mevcut_ilceler.union(yeni_ilceler)))
+                    ilce_verileri[sehir] = turkce_sirala(list(mevcut_ilceler.union(yeni_ilceler)))
 
             if all(kolon in zemin_df.columns for kolon in ["Sehir", "Ilce", "Mahalle"]):
                 for (sehir, ilce), grup in zemin_df.groupby(["Sehir", "Ilce"]):
                     anahtar = f"{sehir}|||{ilce}"
-                    mahalle_verileri[anahtar] = sorted(grup["Mahalle"].dropna().unique().tolist())
+                    mahalle_verileri[anahtar] = turkce_sirala(grup["Mahalle"].dropna().unique().tolist())
 
         except Exception as e:
             print("Zemin CSV okuma hatası:", e)
@@ -380,7 +385,7 @@ def index():
     if zemin_df is not None and not zemin_df.empty and "Sehir" in zemin_df.columns:
         tum_sehirler.update(zemin_df["Sehir"].dropna().unique().tolist())
 
-    sehirler = sorted(tum_sehirler)
+    sehirler = turkce_sirala(list(tum_sehirler))
 
     tum_depremler = canlı_depremleri_getir()
 
@@ -997,7 +1002,7 @@ def index():
                 }}
 
                 const secilenSehir = sehirSelect.value;
-                const ilceler = ilceVerileri[secilenSehir] || [];
+                const ilceler = (ilceVerileri[secilenSehir] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
                 ilceSelect.innerHTML = "";
 
@@ -1048,7 +1053,7 @@ def index():
                 }}
 
                 const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
-                const mahalleler = mahalleVerileri[anahtar] || [];
+                const mahalleler = (mahalleVerileri[anahtar] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
                 mahalleSelect.innerHTML = "";
 

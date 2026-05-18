@@ -7,6 +7,7 @@ import requests
 import json
 import unicodedata
 import sqlite3
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -474,6 +475,40 @@ def index():
                     tahmin_sonucu = f"{konum_metni} için sonuç: {risk_durumu}"
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
+
+                # Analiz sonucu SQLite veritabanına kaydedilir
+                try:
+                    conn = sqlite3.connect(db_yolu)
+                    cursor = conn.cursor()
+
+                    cursor.execute("""
+                        INSERT INTO analiz_kayitlari (
+                            sehir,
+                            ilce,
+                            mahalle,
+                            risk_sonucu,
+                            risk_skoru,
+                            zemin_riski,
+                            tarih
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        secilen_sehir,
+                        secilen_ilce,
+                        secilen_mahalle,
+                        risk_durumu,
+                        risk_skoru,
+                        zemin_riski,
+                        datetime.now().strftime("%d.%m.%Y %H:%M")
+                    ))
+
+                    conn.commit()
+                    conn.close()
+
+                    print("Analiz veritabanına kaydedildi.")
+
+                except Exception as db_hata:
+                    print("Veritabanı kayıt hatası:", db_hata)
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_

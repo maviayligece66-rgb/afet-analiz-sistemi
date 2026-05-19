@@ -1463,7 +1463,21 @@ def index():
             }}
 
             window.onload = function () {{
-                girisSesliAciklama();
+
+                let sesSayaci = Number(
+                    localStorage.getItem("riskatlasSesliGirisSayaci") || 0
+                );
+
+                if (sesSayaci < 2) {{
+                    setTimeout(() => {{
+                        girisSesliAciklama();
+
+                        localStorage.setItem(
+                            "riskatlasSesliGirisSayaci",
+                            sesSayaci + 1
+                        );
+                    }}, 800);
+                }}
 
                 const depremAlarmVar = "{deprem_alarm_var}" === "True";
 

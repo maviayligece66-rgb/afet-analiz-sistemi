@@ -347,6 +347,7 @@ def index():
     oneriler = []
     deprem_alarm_var = False
     alarm_mesaji = ""
+    analiz_yapildi = False
 
     # Şehir listesi önce SQLite veritabanından alınır.
     # Veritabanı yoksa eski CSV dosyası yedek olarak kullanılır.
@@ -448,6 +449,7 @@ def index():
         deprem_ozeti = "Son 4+ büyüklüğünde deprem bulunamadı."
 
     if request.method == "POST":
+        analiz_yapildi = True
         try:
             secilen_sehir = gorunum_duzelt(request.form.get("sehir", ""))
             secilen_ilce = gorunum_duzelt(request.form.get("ilce", ""))
@@ -668,6 +670,9 @@ def index():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="theme-color" content="#d90429">
         <link rel="manifest" href="/static/manifest.json">
+        <link rel="apple-touch-icon" href="/static/icon.png">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
         <style>
             :root {{
@@ -811,7 +816,7 @@ def index():
             }}
 
             .landing-screen {{
-                min-height:92vh;
+                min-height:100vh;
                 position:relative;
                 overflow:hidden;
                 border-radius:24px;
@@ -1111,6 +1116,24 @@ def index():
             @media (max-width:700px) {{
                 body {{
                     padding:8px;
+                    background:
+                        linear-gradient(180deg, rgba(3,10,22,0.35), rgba(3,10,22,0.88)),
+                        url('/static/mobile-bg.png');
+                    background-size: cover;
+                    background-position: center top;
+                    background-repeat: no-repeat;
+                    background-attachment: scroll;
+                }}
+
+                .landing-screen {{
+                    background:
+                        linear-gradient(180deg, rgba(3,10,22,0.25), rgba(3,10,22,0.82)),
+                        url('/static/mobile-bg.png');
+                    background-size: cover;
+                    background-position: center top;
+                    background-repeat: no-repeat;
+                    border-radius: 22px;
+                    overflow: hidden;
                 }}
 
                 .box {{
@@ -1146,17 +1169,26 @@ def index():
                     justify-content:flex-start;
                 }}
 
+                .top-actions button {{
+                    width: 100%;
+                    font-size: 16px;
+                    padding: 14px;
+                }}
+
                 .landing-center {{
                     min-height:auto;
                     padding:28px 0;
                 }}
 
                 .landing-panel {{
-                    padding:22px;
+                    padding:26px 20px;
+                    width:100%;
+                    border-radius:28px;
                 }}
 
                 .landing-panel h1 {{
-                    font-size:30px;
+                    font-size:42px;
+                    line-height:1.15;
                 }}
 
                 .side-card {{
@@ -1454,23 +1486,25 @@ def index():
                 • <b>Zemin Riski:</b> kullanıcı tarafından girilmez; seçilen bölgeye göre sistem tarafından otomatik kullanılır.
             </div>
 
-            <h2
-                style="color:{risk_rengi};"
-                aria-live="assertive"
-                role="alert"
-            >
-                {tahmin_sonucu}
-            </h2>
+            <section id="analizSonucAlani">
+                <h2
+                    style="color:{risk_rengi};"
+                    aria-live="assertive"
+                    role="alert"
+                >
+                    {tahmin_sonucu}
+                </h2>
 
-            {f'''
-            <div class="risk-score-box">
-                Risk Skoru: {risk_skoru}/5
-            </div>
-            ''' if risk_skoru > 0 else ""}
+                {f'''
+                <div class="risk-score-box">
+                    Risk Skoru: {risk_skoru}/5
+                </div>
+                ''' if risk_skoru > 0 else ""}
 
-            {zemin_bilgisi_html}
+                {zemin_bilgisi_html}
 
-            <p>{aciklama}</p>
+                <p>{aciklama}</p>
+            </section>
 
             <button
                 type="button"
@@ -1505,6 +1539,7 @@ def index():
                 .catch(error => console.log("Service Worker hatası:", error));
             }}
 
+            const analizYapildi = "{analiz_yapildi}" === "True";
             const depremVerileri = {deprem_verileri_json};
             const ilceVerileri = {ilce_verileri_json};
             const mahalleVerileri = {mahalle_verileri_json};
@@ -1791,6 +1826,22 @@ def index():
 
                 if (depremAlarmVar) {{
                     console.log("Genel canlı deprem alarmı mevcut. Konum modu açılırsa yakınlık kontrolü yapılır.");
+                }}
+
+                if (analizYapildi) {{
+                    document.getElementById("landingScreen").style.display = "none";
+                    document.getElementById("mainContent").classList.add("active");
+
+                    setTimeout(() => {{
+                        const sonucAlani = document.getElementById("analizSonucAlani");
+
+                        if (sonucAlani) {{
+                            sonucAlani.scrollIntoView({{
+                                behavior: "smooth",
+                                block: "start"
+                            }});
+                        }}
+                    }}, 450);
                 }}
             }};
         </script>

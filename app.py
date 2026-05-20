@@ -689,7 +689,6 @@ def index():
             }}
 
             body {{
-                scroll-behavior:smooth;
                 background:
                     radial-gradient(circle at top left, rgba(0,194,255,0.18), transparent 28%),
                     radial-gradient(circle at bottom right, rgba(47,137,255,0.20), transparent 30%),
@@ -1068,9 +1067,11 @@ def index():
             }}
 
             .main-content {{
+                display:none;
+            }}
+
+            .main-content.active {{
                 display:block;
-                margin-top:25px;
-                scroll-margin-top:18px;
             }}
 
             .emergency-alert {{
@@ -1346,7 +1347,7 @@ def index():
             </div>
         </section>
 
-        <main id="analysisSection" class="main-content">
+        <main id="mainContent" class="main-content">
         <div
             id="emergencyAlert"
             class="emergency-alert"
@@ -1563,16 +1564,9 @@ def index():
             }}
 
             function detayliAnalizeGec() {{
-                const hedef = document.getElementById("analysisSection");
-
-                if (hedef) {{
-                    hedef.scrollIntoView({{
-                        behavior: "smooth",
-                        block: "start"
-                    }});
-                }}
-
-                sesliBilgi("Analiz ekranına geçiliyor.");
+                document.getElementById("landingScreen").style.display = "none";
+                document.getElementById("mainContent").classList.add("active");
+                sesliBilgi("Detaylı analiz ekranına geçildi.");
             }}
 
             function mesafeKm(lat1, lon1, lat2, lon2) {{
@@ -1835,13 +1829,16 @@ def index():
                 }}
 
                 if (analizYapildi) {{
+                    document.getElementById("landingScreen").style.display = "none";
+                    document.getElementById("mainContent").classList.add("active");
+
                     setTimeout(() => {{
                         const sonucAlani = document.getElementById("analizSonucAlani");
 
                         if (sonucAlani) {{
                             sonucAlani.scrollIntoView({{
                                 behavior: "smooth",
-                                block: "center"
+                                block: "start"
                             }});
                         }}
                     }}, 450);

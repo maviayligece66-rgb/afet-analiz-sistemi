@@ -821,8 +821,8 @@ def index():
                 margin:0 auto 20px auto;
                 max-width:1250px;
                 background:
-                    linear-gradient(90deg, rgba(6,17,31,0.96), rgba(6,17,31,0.68)),
-                    radial-gradient(circle at 70% 45%, rgba(0,194,255,0.22), transparent 28%),
+                    linear-gradient(90deg, rgba(6,17,31,0.72), rgba(6,17,31,0.40)),
+                    radial-gradient(circle at 70% 45%, rgba(0,194,255,0.16), transparent 28%),
                     url('/static/riskatlas-bg.png');
                 background-size:cover;
                 background-position:center;

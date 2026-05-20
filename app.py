@@ -883,6 +883,17 @@ def index():
                 justify-content:flex-end;
             }}
 
+            .voice-toggle-btn {{
+                background:rgba(39,174,96,0.22) !important;
+                border:1px solid rgba(39,174,96,0.55) !important;
+            }}
+
+            .voice-toggle-btn.off {{
+                background:rgba(255,255,255,0.10) !important;
+                border:1px solid rgba(255,255,255,0.22) !important;
+                color:#cfd8e3;
+            }}
+
             .top-actions button {{
                 background:rgba(8,24,43,0.72);
                 border:1px solid var(--border);
@@ -1236,8 +1247,11 @@ def index():
                 </div>
 
                 <div class="top-actions">
-                    <button type="button" onclick="girisSesliAciklama()" aria-label="Erişilebilir sesli rehberi başlat">
+                    <button type="button" onclick="girisSesliAciklama('manual')" aria-label="Erişilebilir sesli rehberi başlat">
                         ♿ Erişilebilir Sesli Rehber
+                    </button>
+                    <button type="button" id="voiceToggleButton" class="voice-toggle-btn" onclick="sesliYonlendirmeAyariniDegistir()" aria-label="Sesli yönlendirme ayarını aç veya kapat">
+                        🔊 Sesli Yönlendirme: Açık
                     </button>
                     <button type="button" onclick="detayliAnalizeGec()" aria-label="Detaylı analiz ekranına geç">
                         ⚙️ Analiz Ekranı
@@ -1281,7 +1295,7 @@ def index():
                         <button
                             type="button"
                             class="secondary-btn"
-                            onclick="girisSesliAciklama()"
+                            onclick="girisSesliAciklama('manual')"
                             aria-label="Giriş ekranındaki erişilebilir sesli rehberi başlat"
                         >
                             ♿ Sesli Rehberi Başlat
@@ -1524,7 +1538,7 @@ def index():
                 <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
                 ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
                 ✅ Mobil cihazlarda titreşim desteği<br>
-                ✅ Görme engelli bireyler için butonla başlatılan ve iki kez tekrar eden Türkçe sesli rehber<br>
+                ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde çalışan ve ayarlardan kapatılabilen Türkçe sesli yönlendirme<br>
                 ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
@@ -1544,7 +1558,52 @@ def index():
             const ilceVerileri = {ilce_verileri_json};
             const mahalleVerileri = {mahalle_verileri_json};
 
+            let girisRehberiEtkilesimleBasladi = false;
+
+            function sesliYonlendirmeAcikMi() {{
+                return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali";
+            }}
+
+            function sesliYonlendirmeButonunuGuncelle() {{
+                const btn = document.getElementById("voiceToggleButton");
+
+                if (!btn) {{
+                    return;
+                }}
+
+                if (sesliYonlendirmeAcikMi()) {{
+                    btn.textContent = "🔊 Sesli Yönlendirme: Açık";
+                    btn.classList.remove("off");
+                    btn.setAttribute("aria-label", "Sesli yönlendirme açık. Kapatmak için dokunun.");
+                }} else {{
+                    btn.textContent = "🔇 Sesli Yönlendirme: Kapalı";
+                    btn.classList.add("off");
+                    btn.setAttribute("aria-label", "Sesli yönlendirme kapalı. Açmak için dokunun.");
+                }}
+            }}
+
+            function sesliYonlendirmeAyariniDegistir() {{
+                if (sesliYonlendirmeAcikMi()) {{
+                    localStorage.setItem("riskatlasSesliYonlendirme", "kapali");
+
+                    if ("speechSynthesis" in window) {{
+                        window.speechSynthesis.cancel();
+                    }}
+                }} else {{
+                    localStorage.setItem("riskatlasSesliYonlendirme", "acik");
+                    setTimeout(() => {{
+                        girisSesliAciklama('manual');
+                    }}, 300);
+                }}
+
+                sesliYonlendirmeButonunuGuncelle();
+            }}
+
             function sesliBilgi(metin) {{
+                if (!sesliYonlendirmeAcikMi()) {{
+                    return;
+                }}
+
                 if ("speechSynthesis" in window) {{
                     const mesaj = new SpeechSynthesisUtterance(metin);
                     mesaj.lang = "tr-TR";
@@ -1557,11 +1616,20 @@ def index():
                 }}
             }}
 
-            function girisSesliAciklama() {{
+            function girisSesliAciklama(kaynak) {{
+
+                if (!sesliYonlendirmeAcikMi()) {{
+                    return;
+                }}
+
+                if (kaynak === 'manual' || kaynak === 'firstInteraction') {{
+                    girisRehberiEtkilesimleBasladi = true;
+                }}
 
                 const metin =
                     "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
-                    "Bu sesli rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
+                    "Sesli yönlendirme varsayılan olarak açıktır. İsterseniz ayarlar kısmındaki sesli yönlendirme düğmesinden bu özelliği kapatabilirsiniz. " +
+                    "Bu rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
                     "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
                     "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
                     "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
@@ -1583,12 +1651,26 @@ def index():
 
                     mesaj1.onend = function () {{
                         setTimeout(() => {{
-                            window.speechSynthesis.speak(mesaj2);
+                            if (sesliYonlendirmeAcikMi()) {{
+                                window.speechSynthesis.speak(mesaj2);
+                            }}
                         }}, 700);
                     }};
 
                     window.speechSynthesis.speak(mesaj1);
                 }}
+            }}
+
+            function ilkEtkilesimdeSesliRehberiBaslat() {{
+                if (!sesliYonlendirmeAcikMi()) {{
+                    return;
+                }}
+
+                if (girisRehberiEtkilesimleBasladi) {{
+                    return;
+                }}
+
+                girisSesliAciklama('firstInteraction');
             }}
 
             function detayliAnalizeGec() {{
@@ -1835,8 +1917,20 @@ def index():
 
             window.onload = function () {{
 
-                // Sesli rehber otomatik başlatılmaz.
-                // Telefon tarayıcıları otomatik sesi engelleyebildiği için kullanıcı butona basınca iki kez okunur.
+                sesliYonlendirmeButonunuGuncelle();
+
+                // Sesli yönlendirme varsayılan olarak açıktır.
+                // Tarayıcı izin verirse girişte otomatik başlar.
+                // Telefon otomatik sesi engellerse kullanıcının ekrana ilk dokunuşunda başlar.
+                setTimeout(() => {{
+                    if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
+                        girisSesliAciklama('auto');
+                    }}
+                }}, 900);
+
+                document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
+                document.addEventListener('touchstart', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
+                document.addEventListener('keydown', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
 
                 const depremAlarmVar = "{deprem_alarm_var}" === "True";
 
@@ -1856,6 +1950,11 @@ def index():
                                 behavior: "smooth",
                                 block: "start"
                             }});
+
+                            const sonucMetni = sonucAlani.innerText.trim();
+                            if (sonucMetni && sesliYonlendirmeAcikMi()) {{
+                                sesliBilgi("Analiz sonucu hazır. " + sonucMetni);
+                            }}
                         }}
                     }}, 450);
                 }}

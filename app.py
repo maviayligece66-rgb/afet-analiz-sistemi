@@ -1236,8 +1236,8 @@ def index():
                 </div>
 
                 <div class="top-actions">
-                    <button type="button" onclick="girisSesliAciklama()" aria-label="Sesli yardım açıklamasını başlat">
-                        🔊 Sesli Yardım
+                    <button type="button" onclick="girisSesliAciklama()" aria-label="Erişilebilir sesli rehberi başlat">
+                        ♿ Erişilebilir Sesli Rehber
                     </button>
                     <button type="button" onclick="detayliAnalizeGec()" aria-label="Detaylı analiz ekranına geç">
                         ⚙️ Analiz Ekranı
@@ -1282,9 +1282,9 @@ def index():
                             type="button"
                             class="secondary-btn"
                             onclick="girisSesliAciklama()"
-                            aria-label="Giriş ekranındaki açıklamayı sesli dinle"
+                            aria-label="Giriş ekranındaki erişilebilir sesli rehberi başlat"
                         >
-                            🔊 Sesli Açıklama
+                            ♿ Sesli Rehberi Başlat
                         </button>
                     </div>
 
@@ -1524,7 +1524,7 @@ def index():
                 <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
                 ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
                 ✅ Mobil cihazlarda titreşim desteği<br>
-                ✅ Görme engelli bireyler için Türkçe sesli yönlendirme<br>
+                ✅ Görme engelli bireyler için butonla başlatılan ve iki kez tekrar eden Türkçe sesli rehber<br>
                 ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
@@ -1558,9 +1558,37 @@ def index():
             }}
 
             function girisSesliAciklama() {{
-                sesliBilgi(
-                    "RiskAtlas konum tabanlı afet uyarı moduna hoş geldiniz. Konumumu kullan butonuna bastığınızda tarayıcı sizden konum izni isteyecek. İzin verirseniz sistem yakınınızdaki kritik depremleri kontrol eder. İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz."
-                );
+
+                const metin =
+                    "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
+                    "Bu sesli rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
+                    "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
+                    "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
+                    "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
+                    "Açıklama şimdi ikinci kez tekrar edilecektir.";
+
+                if ("speechSynthesis" in window) {{
+
+                    window.speechSynthesis.cancel();
+
+                    const mesaj1 = new SpeechSynthesisUtterance(metin);
+                    mesaj1.lang = "tr-TR";
+                    mesaj1.rate = 0.9;
+                    mesaj1.pitch = 1;
+
+                    const mesaj2 = new SpeechSynthesisUtterance(metin);
+                    mesaj2.lang = "tr-TR";
+                    mesaj2.rate = 0.9;
+                    mesaj2.pitch = 1;
+
+                    mesaj1.onend = function () {{
+                        setTimeout(() => {{
+                            window.speechSynthesis.speak(mesaj2);
+                        }}, 700);
+                    }};
+
+                    window.speechSynthesis.speak(mesaj1);
+                }}
             }}
 
             function detayliAnalizeGec() {{
@@ -1807,20 +1835,8 @@ def index():
 
             window.onload = function () {{
 
-                let sesSayaci = Number(
-                    localStorage.getItem("riskatlasSesliGirisSayaci") || 0
-                );
-
-                if (sesSayaci < 2) {{
-                    setTimeout(() => {{
-                        girisSesliAciklama();
-
-                        localStorage.setItem(
-                            "riskatlasSesliGirisSayaci",
-                            sesSayaci + 1
-                        );
-                    }}, 800);
-                }}
+                // Sesli rehber otomatik başlatılmaz.
+                // Telefon tarayıcıları otomatik sesi engelleyebildiği için kullanıcı butona basınca iki kez okunur.
 
                 const depremAlarmVar = "{deprem_alarm_var}" === "True";
 

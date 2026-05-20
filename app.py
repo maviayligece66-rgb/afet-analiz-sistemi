@@ -812,51 +812,148 @@ def index():
 
             .landing-screen {{
                 min-height:92vh;
-                display:flex;
-                align-items:center;
-                justify-content:center;
                 position:relative;
                 overflow:hidden;
                 border-radius:24px;
                 margin:0 auto 20px auto;
                 max-width:1250px;
                 background:
-                    linear-gradient(90deg, rgba(6,17,31,0.72), rgba(6,17,31,0.40)),
-                    radial-gradient(circle at 70% 45%, rgba(0,194,255,0.16), transparent 28%),
+                    linear-gradient(180deg, rgba(3,10,22,0.18), rgba(3,10,22,0.78)),
                     url('/static/riskatlas-bg.png');
                 background-size:cover;
                 background-position:center;
                 border:1px solid var(--border);
                 box-shadow:0 25px 60px rgba(0,0,0,0.45);
+                padding:28px;
+                box-sizing:border-box;
+            }}
+
+            .landing-topbar {{
+                display:flex;
+                justify-content:space-between;
+                align-items:flex-start;
+                gap:18px;
+                position:relative;
+                z-index:2;
+            }}
+
+            .brand {{
+                display:flex;
+                align-items:center;
+                gap:12px;
+            }}
+
+            .brand-icon {{
+                width:54px;
+                height:54px;
+                border-radius:16px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                background:linear-gradient(135deg, #ef233c, #9d0208);
+                box-shadow:0 10px 25px rgba(255,59,59,0.28);
+                font-size:28px;
+            }}
+
+            .brand-title {{
+                font-size:30px;
+                font-weight:800;
+                letter-spacing:-0.5px;
+            }}
+
+            .brand-title span {{
+                color:#ff3b3b;
+            }}
+
+            .brand-subtitle {{
+                color:#d7eaff;
+                font-size:14px;
+                margin-top:2px;
+            }}
+
+            .top-actions {{
+                display:flex;
+                flex-wrap:wrap;
+                gap:10px;
+                justify-content:flex-end;
+            }}
+
+            .top-actions button {{
+                background:rgba(8,24,43,0.72);
+                border:1px solid var(--border);
+                box-shadow:none;
+                padding:10px 14px;
+            }}
+
+            .landing-center {{
+                min-height:62vh;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                position:relative;
+                z-index:2;
             }}
 
             .landing-panel {{
-                width:min(720px, 92%);
+                width:min(560px, 92%);
                 padding:32px;
-                background:rgba(8,24,43,0.82);
+                background:rgba(7,17,33,0.86);
                 border:1px solid var(--border);
                 border-radius:24px;
-                backdrop-filter:blur(12px);
-                margin:20px;
+                backdrop-filter:blur(14px);
+                text-align:center;
+                box-shadow:0 20px 60px rgba(0,0,0,0.42);
             }}
 
             .landing-panel h1 {{
-                text-align:left;
-                font-size:42px;
-                margin:0 0 10px 0;
+                text-align:center;
+                font-size:36px;
+                margin:0 0 8px 0;
+                letter-spacing:-0.5px;
+            }}
+
+            .landing-panel h1 span {{
+                color:#ff3b3b;
+            }}
+
+            .landing-panel h2 {{
+                text-align:center;
+                margin:18px 0 8px 0;
+                font-size:22px;
             }}
 
             .landing-panel p {{
-                color:var(--muted);
-                font-size:17px;
-                line-height:1.6;
+                color:#d7eaff;
+                font-size:16px;
+                line-height:1.55;
+                margin:8px 0;
+            }}
+
+            .location-symbol {{
+                margin:22px auto 14px auto;
+                width:92px;
+                height:92px;
+                border-radius:50%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                background:radial-gradient(circle, rgba(47,137,255,0.28), rgba(0,194,255,0.06));
+                border:1px solid rgba(95,177,255,0.35);
+                font-size:54px;
+                box-shadow:0 0 45px rgba(47,137,255,0.28);
             }}
 
             .landing-actions {{
                 display:flex;
                 flex-wrap:wrap;
+                justify-content:center;
                 gap:12px;
-                margin-top:20px;
+                margin-top:22px;
+            }}
+
+            .landing-actions button {{
+                min-width:170px;
+                font-size:16px;
             }}
 
             .secondary-btn {{
@@ -871,6 +968,97 @@ def index():
                 background:rgba(255,255,255,0.08);
                 color:#dff6ff;
                 line-height:1.5;
+            }}
+
+            .side-card {{
+                position:absolute;
+                z-index:2;
+                width:250px;
+                padding:18px;
+                border-radius:16px;
+                background:rgba(7,17,33,0.72);
+                border:1px solid var(--border);
+                backdrop-filter:blur(10px);
+                line-height:1.5;
+                box-shadow:0 18px 45px rgba(0,0,0,0.28);
+            }}
+
+            .side-card h3 {{
+                margin:0 0 8px 0;
+            }}
+
+            .side-card p,
+            .side-card li {{
+                color:#d7eaff;
+                font-size:14px;
+            }}
+
+            .side-card.left {{
+                left:28px;
+                bottom:145px;
+                border-color:rgba(255,59,59,0.42);
+            }}
+
+            .side-card.right {{
+                right:28px;
+                bottom:145px;
+                border-color:rgba(39,174,96,0.46);
+            }}
+
+            .side-card ul {{
+                margin:8px 0 0 0;
+                padding-left:22px;
+            }}
+
+            .bottom-features {{
+                position:absolute;
+                z-index:2;
+                left:28px;
+                right:28px;
+                bottom:28px;
+                display:grid;
+                grid-template-columns:repeat(4, 1fr);
+                gap:12px;
+                padding:14px;
+                background:rgba(7,17,33,0.64);
+                border:1px solid var(--border);
+                border-radius:18px;
+                backdrop-filter:blur(10px);
+            }}
+
+            .feature-item {{
+                display:flex;
+                gap:12px;
+                align-items:flex-start;
+                padding:10px;
+                border-right:1px solid rgba(95,177,255,0.16);
+            }}
+
+            .feature-item:last-child {{
+                border-right:none;
+            }}
+
+            .feature-icon {{
+                width:42px;
+                height:42px;
+                border-radius:50%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                background:rgba(47,137,255,0.20);
+                font-size:22px;
+                flex-shrink:0;
+            }}
+
+            .feature-item b {{
+                display:block;
+                margin-bottom:4px;
+            }}
+
+            .feature-item span {{
+                color:#c8dff2;
+                font-size:14px;
+                line-height:1.4;
             }}
 
             .main-content {{
@@ -945,6 +1133,53 @@ def index():
                     font-size:18px;
                 }}
 
+                .landing-screen {{
+                    min-height:auto;
+                    padding:14px;
+                }}
+
+                .landing-topbar {{
+                    flex-direction:column;
+                }}
+
+                .top-actions {{
+                    justify-content:flex-start;
+                }}
+
+                .landing-center {{
+                    min-height:auto;
+                    padding:28px 0;
+                }}
+
+                .landing-panel {{
+                    padding:22px;
+                }}
+
+                .landing-panel h1 {{
+                    font-size:30px;
+                }}
+
+                .side-card {{
+                    position:static;
+                    width:auto;
+                    margin:12px 0;
+                }}
+
+                .bottom-features {{
+                    position:static;
+                    grid-template-columns:1fr;
+                    margin-top:12px;
+                }}
+
+                .feature-item {{
+                    border-right:none;
+                    border-bottom:1px solid rgba(95,177,255,0.16);
+                }}
+
+                .feature-item:last-child {{
+                    border-bottom:none;
+                }}
+
                 .emergency-alert h1 {{
                     font-size:34px;
                 }}
@@ -959,50 +1194,123 @@ def index():
     <body>
 
         <section class="landing-screen" id="landingScreen">
-            <div class="landing-panel" role="region" aria-label="RiskAtlas giriş ve konum modu">
-                <h1>RiskAtlas</h1>
-                <h2 style="text-align:left; margin-top:0;">Konum Tabanlı Afet Uyarı Modu</h2>
-
-                <p>
-                    Bu mod, bulunduğunuz konuma yakın 4.5 ve üzeri depremleri takip eder.
-                    Yakınınızda kritik bir deprem algılanırsa sesli, görsel ve titreşimli uyarı verir.
-                </p>
-
-                <p>
-                    Görme engelli kullanıcılar için konum izni öncesinde sesli yönlendirme yapılır.
-                    Uzak şehirlerdeki depremler için gereksiz panik alarmı verilmemesi hedeflenir.
-                </p>
-
-                <div class="landing-actions">
-                    <button
-                        type="button"
-                        onclick="konumModunuBaslat()"
-                        aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat"
-                    >
-                        📍 Konumumu Kullan
-                    </button>
-
-                    <button
-                        type="button"
-                        class="secondary-btn"
-                        onclick="detayliAnalizeGec()"
-                        aria-label="Konum kullanmadan detaylı analiz ekranına geç"
-                    >
-                        Şehir Seçerek Devam Et
-                    </button>
-
-                    <button
-                        type="button"
-                        class="secondary-btn"
-                        onclick="girisSesliAciklama()"
-                        aria-label="Giriş ekranındaki açıklamayı sesli dinle"
-                    >
-                        🔊 Sesli Açıklama
-                    </button>
+            <div class="landing-topbar">
+                <div class="brand" aria-label="RiskAtlas logo ve başlık">
+                    <div class="brand-icon">〽️</div>
+                    <div>
+                        <div class="brand-title">Risk<span>Atlas</span></div>
+                        <div class="brand-subtitle">Deprem Risk Analiz ve Uyarı Sistemi</div>
+                    </div>
                 </div>
 
-                <div class="status-box" id="konumDurumu" aria-live="polite">
-                    Konum modu henüz başlatılmadı.
+                <div class="top-actions">
+                    <button type="button" onclick="girisSesliAciklama()" aria-label="Sesli yardım açıklamasını başlat">
+                        🔊 Sesli Yardım
+                    </button>
+                    <button type="button" onclick="detayliAnalizeGec()" aria-label="Detaylı analiz ekranına geç">
+                        ⚙️ Analiz Ekranı
+                    </button>
+                </div>
+            </div>
+
+            <div class="landing-center">
+                <div class="landing-panel" role="region" aria-label="RiskAtlas giriş ve konum modu">
+                    <h1>Risk<span>Atlas</span>'a Hoş Geldiniz</h1>
+                    <p>
+                        Konumunuza göre deprem risklerini analiz eder, size özel uyarılar ve öneriler sunar.
+                    </p>
+
+                    <div class="location-symbol" aria-hidden="true">📍</div>
+
+                    <h2>Güvenliğiniz için konumunuzu kullanıyoruz.</h2>
+                    <p>
+                        4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkileniyorsa sizi uyarır,
+                        uzak depremler için gereksiz alarm vermez.
+                    </p>
+
+                    <div class="landing-actions">
+                        <button
+                            type="button"
+                            onclick="konumModunuBaslat()"
+                            aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat"
+                        >
+                            📍 Konumumu Kullan
+                        </button>
+
+                        <button
+                            type="button"
+                            class="secondary-btn"
+                            onclick="detayliAnalizeGec()"
+                            aria-label="Konum kullanmadan şehir seçerek detaylı analiz ekranına geç"
+                        >
+                            Şehir Seçerek Devam Et
+                        </button>
+
+                        <button
+                            type="button"
+                            class="secondary-btn"
+                            onclick="girisSesliAciklama()"
+                            aria-label="Giriş ekranındaki açıklamayı sesli dinle"
+                        >
+                            🔊 Sesli Açıklama
+                        </button>
+                    </div>
+
+                    <div class="status-box" id="konumDurumu" aria-live="polite">
+                        Konum modu henüz başlatılmadı.
+                    </div>
+                </div>
+            </div>
+
+            <div class="side-card left">
+                <h3>🚨 Neden Konum İzni?</h3>
+                <p>
+                    Size en doğru deprem uyarılarını sunabilmek için bulunduğunuz konuma ihtiyaç duyarız.
+                    Sadece yakınınızdaki risklerde sizi uyarırız.
+                </p>
+            </div>
+
+            <div class="side-card right">
+                <h3>♿ Erişilebilir Özellikler</h3>
+                <ul>
+                    <li>Sesli yönlendirme</li>
+                    <li>Ekran okuyucu uyumu</li>
+                    <li>Büyük yazı ve yüksek kontrast</li>
+                    <li>Titreşimli uyarılar</li>
+                </ul>
+            </div>
+
+            <div class="bottom-features">
+                <div class="feature-item">
+                    <div class="feature-icon">🎯</div>
+                    <div>
+                        <b>Konuma Dayalı Uyarı</b>
+                        <span>Sadece size yakın depremlerde uyarı alın.</span>
+                    </div>
+                </div>
+
+                <div class="feature-item">
+                    <div class="feature-icon">🔔</div>
+                    <div>
+                        <b>Gerçek Zamanlı Bildirim</b>
+                        <span>4.5+ depremlerde sesli, görsel ve titreşimli uyarı.</span>
+                    </div>
+                </div>
+
+                <div class="feature-item">
+                    <div class="feature-icon">🛡️</div>
+                    <div>
+                        <b>Güvenilir Kaynaklar</b>
+                        <span>AFAD ve Kandilli verileri kullanılır.</span>
+                    </div>
+                </div>
+
+                <div class="feature-item">
+                    <div class="feature-icon">👥</div>
+                    <div>
+                        <b>Herkes İçin Erişilebilir</b>
+                        <span>Engelli bireyler düşünülerek tasarlandı.</span>
+                    </div>
                 </div>
             </div>
         </section>

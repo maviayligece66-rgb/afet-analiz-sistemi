@@ -15,6 +15,39 @@ base = os.path.dirname(os.path.abspath(__file__))
 
 data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
 db_yolu = os.path.join(base, 'datasets', 'afet_veritabani.db')
+
+def veritabani_olustur():
+    """Analiz kayıtları için SQLite veritabanı ve tablo yapısını oluşturur."""
+    try:
+        os.makedirs(os.path.join(base, 'datasets'), exist_ok=True)
+
+        conn = sqlite3.connect(db_yolu)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS analiz_kayitlari (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sehir TEXT,
+                ilce TEXT,
+                mahalle TEXT,
+                risk_sonucu TEXT,
+                risk_skoru INTEGER,
+                zemin_riski REAL,
+                tarih TEXT
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+        print("SQLite veritabanı hazır.")
+
+    except Exception as e:
+        print("Veritabanı oluşturma hatası:", e)
+
+
+veritabani_olustur()
+
 model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
 geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
 ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')

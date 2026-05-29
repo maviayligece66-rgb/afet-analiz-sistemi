@@ -1,10 +1,10 @@
 {
-    "name": "Afet Risk Analizi",
-    "short_name": "AfetAI",
-    "description": "Yapay zekâ destekli afet risk ve acil durum öneri sistemi",
+    "name": "RiskAtlas - Deprem Risk Analiz ve Uyarı Sistemi",
+    "short_name": "RiskAtlas",
+    "description": "Yapay zekâ destekli deprem risk analiz, canlı uyarı ve erişilebilir afet yönetim sistemi",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#ffffff",
+    "background_color": "#06111f",
     "theme_color": "#d90429",
     "orientation": "portrait",
     "icons": [

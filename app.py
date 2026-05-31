@@ -8,6 +8,7 @@ import json
 import unicodedata
 import sqlite3
 from datetime import datetime
+import time
 
 app = Flask(__name__)
 
@@ -60,7 +61,7 @@ def tekil_ve_sirali(liste):
 def afad_depremleri_getir():
     try:
         url = "https://deprem.afad.gov.tr/apiv2/event/latest"
-        r = requests.get(url, timeout=8)
+        r = requests.get(url, timeout=3)
 
         if r.status_code == 200:
             veriler = r.json()
@@ -96,7 +97,7 @@ def afad_depremleri_getir():
 def kandilli_depremleri_getir():
     try:
         url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
-        r = requests.get(url, timeout=8)
+        r = requests.get(url, timeout=3)
 
         if r.status_code == 200:
             depremler = r.json().get("result", [])
@@ -112,14 +113,33 @@ def kandilli_depremleri_getir():
     return []
 
 
+DEPREM_CACHE = {
+    "zaman": 0,
+    "veri": []
+}
+
 def canlı_depremleri_getir():
+    """
+    Canlı deprem verisini her sayfa açılışında tekrar tekrar çekmek siteyi yavaşlatıyordu.
+    Bu yüzden veriler 5 dakika boyunca cache içinde tutulur.
+    """
+    simdi = time.time()
+
+    if DEPREM_CACHE["veri"] and simdi - DEPREM_CACHE["zaman"] < 300:
+        return DEPREM_CACHE["veri"]
+
     # Önce AFAD verisi alınır. AFAD çalışmazsa Kandilli yedek kaynak olarak kullanılır.
     afad = afad_depremleri_getir()
 
     if afad:
+        DEPREM_CACHE["veri"] = afad
+        DEPREM_CACHE["zaman"] = simdi
         return afad
 
-    return kandilli_depremleri_getir()
+    kandilli = kandilli_depremleri_getir()
+    DEPREM_CACHE["veri"] = kandilli
+    DEPREM_CACHE["zaman"] = simdi
+    return kandilli
 
 
 def zemin_bilgisi_getir(zemin_df, sehir, ilce="", mahalle=""):
@@ -327,6 +347,11 @@ def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
 
     except Exception as e:
         print("GeoJSON harita hatası:", e)
+
+
+@app.route("/healthz")
+def healthz():
+    return "OK", 200
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -666,7 +691,6 @@ def index():
 
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="60">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="theme-color" content="#081120">
         <link rel="manifest" href="/static/manifest.json">

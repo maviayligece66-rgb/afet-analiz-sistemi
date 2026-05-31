@@ -668,9 +668,9 @@ def index():
         <meta charset="UTF-8">
         <meta http-equiv="refresh" content="60">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta name="theme-color" content="#d90429">
+        <meta name="theme-color" content="#081120">
         <link rel="manifest" href="/static/manifest.json">
-        <link rel="apple-touch-icon" href="/static/icon.png">
+        <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
@@ -686,6 +686,30 @@ def index():
                 --blue2:#00c2ff;
                 --danger:#ff3b3b;
                 --border:rgba(95, 177, 255, 0.25);
+            }}
+
+
+
+            #splash-screen {{
+                position:fixed;
+                inset:0;
+                background:#081120;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                z-index:999999;
+                transition:opacity .8s ease;
+            }}
+
+            #splash-screen.fade-out {{
+                opacity:0;
+                pointer-events:none;
+            }}
+
+            .splash-image {{
+                width:100%;
+                height:100%;
+                object-fit:cover;
             }}
 
             body {{
@@ -1235,6 +1259,10 @@ def index():
     </head>
 
     <body>
+
+        <div id="splash-screen">
+            <img src="/static/splash/splash.png" alt="RiskAtlas Açılış Ekranı" class="splash-image">
+        </div>
 
         <section class="landing-screen" id="landingScreen">
             <div class="landing-topbar">
@@ -1916,6 +1944,16 @@ def index():
             }}
 
             window.onload = function () {{
+
+                setTimeout(function () {{
+                    const splash = document.getElementById("splash-screen");
+                    if (splash) {{
+                        splash.classList.add("fade-out");
+                        setTimeout(function () {{
+                            splash.remove();
+                        }}, 800);
+                    }}
+                }}, 1800);
 
                 sesliYonlendirmeButonunuGuncelle();
 

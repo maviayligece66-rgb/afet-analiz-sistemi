@@ -693,10 +693,33 @@ def index():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="theme-color" content="#081120">
-        <link rel="manifest" href="/static/manifest.json">
-        <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+        <script>
+            // PWA/uygulama icon ayarları sadece telefonda aktif olur.
+            // Böylece bilgisayarda site normal web sitesi gibi açılır.
+            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {{
+
+                const manifest = document.createElement("link");
+                manifest.rel = "manifest";
+                manifest.href = "/static/manifest.json";
+                document.head.appendChild(manifest);
+
+                const appleIcon = document.createElement("link");
+                appleIcon.rel = "apple-touch-icon";
+                appleIcon.href = "/static/icons/icon-192.png";
+                document.head.appendChild(appleIcon);
+
+                const appleCapable = document.createElement("meta");
+                appleCapable.name = "apple-mobile-web-app-capable";
+                appleCapable.content = "yes";
+                document.head.appendChild(appleCapable);
+
+                const appleStatus = document.createElement("meta");
+                appleStatus.name = "apple-mobile-web-app-status-bar-style";
+                appleStatus.content = "black-translucent";
+                document.head.appendChild(appleStatus);
+            }}
+        </script>
 
         <style>
             :root {{
@@ -714,15 +737,9 @@ def index():
 
 
 
+            /* Splash ekranı masaüstünde görünmez; sadece telefon ekranında açılır. */
             #splash-screen {{
-                position:fixed;
-                inset:0;
-                background:#081120;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                z-index:999999;
-                transition:opacity .8s ease;
+                display:none;
             }}
 
             #splash-screen.fade-out {{
@@ -1173,6 +1190,17 @@ def index():
             }}
 
             @media (max-width:700px) {{
+                #splash-screen {{
+                    position:fixed;
+                    inset:0;
+                    background:#081120;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    z-index:999999;
+                    transition:opacity .8s ease;
+                }}
+
                 body {{
                     padding:8px;
                     background:
@@ -1599,10 +1627,21 @@ def index():
         </main>
 
         <script>
-            if ("serviceWorker" in navigator) {{
+            // Service Worker sadece telefon/PWA kullanımı için kaydedilir.
+            // Masaüstünde eski icon veya PWA davranışı oluşmasını engeller.
+            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
                 navigator.serviceWorker.register("/static/service-worker.js")
                 .then(() => console.log("Service Worker kayıt edildi."))
                 .catch(error => console.log("Service Worker hatası:", error));
+            }}
+
+            // Bilgisayarda daha önce kaydedilmiş Service Worker varsa temizlenir.
+            if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {{
+                    for (let registration of registrations) {{
+                        registration.unregister();
+                    }}
+                }});
             }}
 
             const analizYapildi = "{analiz_yapildi}" === "True";
@@ -1969,15 +2008,23 @@ def index():
 
             window.onload = function () {{
 
-                setTimeout(function () {{
+                // Splash ekranı yalnızca telefon ekranında çalışır.
+                if (window.innerWidth <= 700) {{
+                    setTimeout(function () {{
+                        const splash = document.getElementById("splash-screen");
+                        if (splash) {{
+                            splash.classList.add("fade-out");
+                            setTimeout(function () {{
+                                splash.remove();
+                            }}, 800);
+                        }}
+                    }}, 1800);
+                }} else {{
                     const splash = document.getElementById("splash-screen");
                     if (splash) {{
-                        splash.classList.add("fade-out");
-                        setTimeout(function () {{
-                            splash.remove();
-                        }}, 800);
+                        splash.remove();
                     }}
-                }}, 1800);
+                }}
 
                 sesliYonlendirmeButonunuGuncelle();
 

@@ -22,6 +22,38 @@ ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
 zemin_yolu = os.path.join(base, 'datasets', 'zemin_verileri.csv')
 
 
+# SQLite veritabanı ve analiz kayıt tablosu otomatik oluşturulur.
+def veritabani_olustur():
+    try:
+        os.makedirs(os.path.dirname(db_yolu), exist_ok=True)
+
+        conn = sqlite3.connect(db_yolu)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS analiz_kayitlari (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sehir TEXT,
+                ilce TEXT,
+                mahalle TEXT,
+                risk_sonucu TEXT,
+                risk_skoru INTEGER,
+                zemin_riski REAL,
+                tarih TEXT
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+        print("Veritabanı hazır: analiz_kayitlari tablosu kontrol edildi.")
+
+    except Exception as e:
+        print("Veritabanı oluşturma hatası:", e)
+
+
+veritabani_olustur()
+
+
 def normalize_text(text):
     text = str(text).lower()
     text = unicodedata.normalize('NFKD', text)
@@ -388,7 +420,8 @@ def index():
         except Exception as e:
             print("Veritabanı okuma hatası:", e)
 
-    elif os.path.exists(data_yolu):
+    # Veritabanında afet_verileri tablosu yoksa veya şehir listesi boşsa CSV yedek olarak kullanılır.
+    if not sehirler and os.path.exists(data_yolu):
         try:
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
 

@@ -54,6 +54,35 @@ def veritabani_olustur():
 veritabani_olustur()
 
 
+def analiz_kayitlarini_getir(limit=10):
+    """Son analiz kayıtlarını SQLite veritabanından getirir."""
+    try:
+        conn = sqlite3.connect(db_yolu)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                sehir,
+                ilce,
+                mahalle,
+                risk_sonucu,
+                risk_skoru,
+                zemin_riski,
+                tarih
+            FROM analiz_kayitlari
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+
+        kayitlar = cursor.fetchall()
+        conn.close()
+        return kayitlar
+
+    except Exception as e:
+        print("Analiz kayıtları okuma hatası:", e)
+        return []
+
+
 def normalize_text(text):
     text = str(text).lower()
     text = unicodedata.normalize('NFKD', text)
@@ -66,24 +95,24 @@ def turkce_sirala(liste):
 
 
 def gorunum_duzelt(text):
-    """KONYA / konya gibi değerleri kullanıcıya düzgün Türkçe baş harf biçiminde gösterir."""
+    """KONYA / konya gibi değerleri kullanıcıya Türkçe karakterleri bozmadan gösterir."""
     text = str(text).strip()
 
-    if not text:
+    if not text or text.lower() == "nan":
         return ""
 
-    # Python .title() Türkçe karakterlerde Gazİantep / GiResun gibi hatalar oluşturabildiği için
-    # burada kelime kelime güvenli biçimde düzenleme yapıyoruz.
-    text = text.lower().replace("i̇", "i")
+    # Türkçe karakterlerde .title() bazen Gazİantep gibi bozulmalara yol açabildiği için
+    # şehir/ilçe adlarını kelime kelime güvenli biçimde düzenliyoruz.
+    text = text.replace("i̇", "i")
+    text = text.lower()
 
-    kelimeler = text.split()
-    sonuc = []
+    kelimeler = []
 
-    for kelime in kelimeler:
+    for kelime in text.split():
         if kelime:
-            sonuc.append(kelime[0].upper() + kelime[1:])
+            kelimeler.append(kelime[0].upper() + kelime[1:])
 
-    return " ".join(sonuc)
+    return " ".join(kelimeler)
 
 
 def tekil_ve_sirali(liste):
@@ -420,9 +449,10 @@ def index():
     analiz_yapildi = False
 
     # Şehir listesi ana veri CSV dosyasından alınır.
-    # Analiz kayıtlarının tutulduğu SQLite tablosu şehir listesi için kullanılmaz;
-    # böylece afet_verileri tablosu yok hatası alınmaz.
-    if os.path.exists(data_yolu):
+    # SQLite burada yalnızca analiz kayıtlarını tutmak için kullanılır.
+
+    # Ana veri CSV dosyası yedek olarak kullanılır.
+    if not sehirler and os.path.exists(data_yolu):
         try:
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
 
@@ -709,6 +739,55 @@ def index():
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
+    analiz_kayitlari = analiz_kayitlarini_getir(limit=10)
+
+    if analiz_kayitlari:
+        kayit_satirlari = ""
+
+        for kayit in analiz_kayitlari:
+            sehir, ilce, mahalle, risk_sonucu, risk_skoru_db, zemin_riski_db, tarih = kayit
+            kayit_satirlari += f"""
+                <tr>
+                    <td>{sehir or '-'}</td>
+                    <td>{ilce or '-'}</td>
+                    <td>{mahalle or '-'}</td>
+                    <td>{risk_sonucu or '-'}</td>
+                    <td>{risk_skoru_db if risk_skoru_db is not None else '-'}</td>
+                    <td>{zemin_riski_db if zemin_riski_db is not None else '-'}</td>
+                    <td>{tarih or '-'}</td>
+                </tr>
+            """
+
+        kayitlar_html = f"""
+            <div class="db-history-box">
+                <h3>💾 Veritabanına Kaydedilen Son Analizler</h3>
+                <p>Bu tablo, SQLite veritabanındaki <b>analiz_kayitlari</b> tablosundan alınır.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Şehir</th>
+                            <th>İlçe</th>
+                            <th>Mahalle</th>
+                            <th>Risk Sonucu</th>
+                            <th>Risk Skoru</th>
+                            <th>Zemin Riski</th>
+                            <th>Tarih</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {kayit_satirlari}
+                    </tbody>
+                </table>
+            </div>
+        """
+    else:
+        kayitlar_html = """
+            <div class="db-history-box">
+                <h3>💾 Veritabanı Kayıtları</h3>
+                <p>Henüz kayıt yok. İlk analizden sonra sonuçlar burada görünecek.</p>
+            </div>
+        """
+
     if tum_depremler:
         deprem_listesi_html = "".join([
             f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
@@ -718,11 +797,6 @@ def index():
         deprem_listesi_html = "<li>Güncel deprem verisi alınamadı.</li>"
 
     deprem_verileri_json = json.dumps(tum_depremler[:30], ensure_ascii=False)
-
-    # Analiz sonrası kullanıcı tekrar giriş ekranına düşmesin diye
-    # ana içerik sunucu tarafında doğrudan açık gönderilir.
-    landing_display = "display:none;" if analiz_yapildi else ""
-    main_content_class = "main-content active" if analiz_yapildi else "main-content"
 
     html = f"""
     <!DOCTYPE html>
@@ -908,6 +982,36 @@ def index():
                 border-left:6px solid #27ae60;
                 border-radius:12px;
                 line-height:1.5;
+            }}
+
+            .db-history-box {{
+                margin-top:20px;
+                padding:18px;
+                background:rgba(255,255,255,0.08);
+                color:var(--text);
+                border-radius:12px;
+                border:1px solid var(--border);
+                overflow-x:auto;
+            }}
+
+            .db-history-box table {{
+                width:100%;
+                border-collapse:collapse;
+                margin-top:12px;
+                min-width:760px;
+            }}
+
+            .db-history-box th,
+            .db-history-box td {{
+                border:1px solid rgba(95,177,255,0.25);
+                padding:10px;
+                text-align:left;
+                font-size:14px;
+            }}
+
+            .db-history-box th {{
+                background:rgba(0,194,255,0.12);
+                color:#dff6ff;
             }}
 
             .accessibility-note {{
@@ -1355,7 +1459,7 @@ def index():
             <img src="/static/splash/splash.png" alt="RiskAtlas Açılış Ekranı" class="splash-image">
         </div>
 
-        <section class="landing-screen" id="landingScreen" style="{landing_display}">
+        <section class="landing-screen" id="landingScreen">
             <div class="landing-topbar">
                 <div class="brand" aria-label="RiskAtlas logo ve başlık">
                     <div class="brand-icon">〽️</div>
@@ -1480,7 +1584,7 @@ def index():
             </div>
         </section>
 
-        <main id="mainContent" class="{main_content_class}">
+        <main id="mainContent" class="main-content">
         <div
             id="emergencyAlert"
             class="emergency-alert"
@@ -1638,6 +1742,8 @@ def index():
 
                 <p>{aciklama}</p>
             </section>
+
+            {kayitlar_html}
 
             <button
                 type="button"

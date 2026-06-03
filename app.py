@@ -66,23 +66,24 @@ def turkce_sirala(liste):
 
 
 def gorunum_duzelt(text):
-    """KONYA / konya gibi değerleri Türkçe karakterleri bozmadan düzgün gösterir."""
+    """KONYA / konya gibi değerleri kullanıcıya düzgün Türkçe baş harf biçiminde gösterir."""
     text = str(text).strip()
 
-    if not text or text.lower() == "nan":
+    if not text:
         return ""
 
-    # Büyük/küçük harf dönüşümünde Türkçe karakterleri korumak için
-    # Python'un title() fonksiyonu yerine özel dönüşüm kullanıyoruz.
-    text = text.replace("I", "ı").replace("İ", "i")
-    text = text.lower()
+    # Python .title() Türkçe karakterlerde Gazİantep / GiResun gibi hatalar oluşturabildiği için
+    # burada kelime kelime güvenli biçimde düzenleme yapıyoruz.
+    text = text.lower().replace("i̇", "i")
 
-    kelimeler = []
-    for kelime in text.split():
+    kelimeler = text.split()
+    sonuc = []
+
+    for kelime in kelimeler:
         if kelime:
-            kelimeler.append(kelime[0].upper() + kelime[1:])
+            sonuc.append(kelime[0].upper() + kelime[1:])
 
-    return " ".join(kelimeler)
+    return " ".join(sonuc)
 
 
 def tekil_ve_sirali(liste):
@@ -418,32 +419,10 @@ def index():
     alarm_mesaji = ""
     analiz_yapildi = False
 
-    # Şehir listesi eski afet verisi tablosundan alınabilir.
-    # Ancak Render ortamında bu tablo yoksa hata vermeden CSV yedeğine geçilir.
-    if os.path.exists(db_yolu):
-        try:
-            conn = sqlite3.connect(db_yolu)
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='afet_verileri'
-            """)
-            tablo_var = cursor.fetchone() is not None
-
-            if tablo_var:
-                df = pd.read_sql_query("SELECT * FROM afet_verileri", conn)
-
-                if "Sehir" in df.columns:
-                    sehirler = tekil_ve_sirali(df["Sehir"].dropna().unique().tolist())
-
-            conn.close()
-
-        except Exception as e:
-            print("Veritabanı okuma hatası:", e)
-
-    # afet_verileri tablosu yoksa veya şehir listesi boşsa CSV yedek olarak kullanılır.
-    if not sehirler and os.path.exists(data_yolu):
+    # Şehir listesi ana veri CSV dosyasından alınır.
+    # Analiz kayıtlarının tutulduğu SQLite tablosu şehir listesi için kullanılmaz;
+    # böylece afet_verileri tablosu yok hatası alınmaz.
+    if os.path.exists(data_yolu):
         try:
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
 
@@ -739,6 +718,11 @@ def index():
         deprem_listesi_html = "<li>Güncel deprem verisi alınamadı.</li>"
 
     deprem_verileri_json = json.dumps(tum_depremler[:30], ensure_ascii=False)
+
+    # Analiz sonrası kullanıcı tekrar giriş ekranına düşmesin diye
+    # ana içerik sunucu tarafında doğrudan açık gönderilir.
+    landing_display = "display:none;" if analiz_yapildi else ""
+    main_content_class = "main-content active" if analiz_yapildi else "main-content"
 
     html = f"""
     <!DOCTYPE html>
@@ -1371,7 +1355,7 @@ def index():
             <img src="/static/splash/splash.png" alt="RiskAtlas Açılış Ekranı" class="splash-image">
         </div>
 
-        <section class="landing-screen" id="landingScreen">
+        <section class="landing-screen" id="landingScreen" style="{landing_display}">
             <div class="landing-topbar">
                 <div class="brand" aria-label="RiskAtlas logo ve başlık">
                     <div class="brand-icon">〽️</div>
@@ -1496,7 +1480,7 @@ def index():
             </div>
         </section>
 
-        <main id="mainContent" class="main-content">
+        <main id="mainContent" class="{main_content_class}">
         <div
             id="emergencyAlert"
             class="emergency-alert"
@@ -2125,93 +2109,6 @@ def index():
             }};
         </script>
 
-    </body>
-    </html>
-    """
-
-    return make_response(html)
-
-
-@app.route("/gecmis")
-def gecmis():
-    """SQLite veritabanına kaydedilen analiz geçmişini gösterir."""
-    try:
-        conn = sqlite3.connect(db_yolu)
-        df = pd.read_sql_query("""
-            SELECT
-                id,
-                sehir,
-                ilce,
-                mahalle,
-                risk_sonucu,
-                risk_skoru,
-                zemin_riski,
-                tarih
-            FROM analiz_kayitlari
-            ORDER BY id DESC
-        """, conn)
-        conn.close()
-
-        if df.empty:
-            tablo_html = "<p>Henüz kayıtlı analiz sonucu bulunmuyor.</p>"
-        else:
-            tablo_html = df.to_html(index=False, classes="history-table", border=0)
-
-    except Exception as e:
-        tablo_html = f"<p>Veritabanı okunurken hata oluştu: {e}</p>"
-
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="tr">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>RiskAtlas Analiz Geçmişi</title>
-        <style>
-            body {{
-                background:#06111f;
-                color:#eaf4ff;
-                font-family:Arial, sans-serif;
-                padding:20px;
-            }}
-            .box {{
-                max-width:1200px;
-                margin:auto;
-                background:rgba(12,29,52,0.92);
-                border:1px solid rgba(95,177,255,0.25);
-                border-radius:18px;
-                padding:22px;
-                overflow-x:auto;
-            }}
-            a {{
-                color:#00c2ff;
-                text-decoration:none;
-                font-weight:bold;
-            }}
-            table {{
-                width:100%;
-                border-collapse:collapse;
-                margin-top:18px;
-            }}
-            th, td {{
-                border:1px solid rgba(95,177,255,0.25);
-                padding:10px;
-                text-align:left;
-            }}
-            th {{
-                background:#0b1e35;
-            }}
-            tr:nth-child(even) {{
-                background:rgba(255,255,255,0.04);
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="box">
-            <h1>📋 RiskAtlas Analiz Geçmişi</h1>
-            <p><a href="/">← Ana sayfaya dön</a></p>
-            {tablo_html}
-        </div>
     </body>
     </html>
     """

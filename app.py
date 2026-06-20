@@ -42,47 +42,19 @@ def veritabani_olustur():
                 tarih TEXT
             )
         """)
-
+        
+        # GÜNCELLEME: sehir sütununa ait arama indeksi eklendi
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
 
         conn.commit()
         conn.close()
-        print("Veritabanı hazır: analiz_kayitlari tablosu kontrol edildi.")
+        print("Veritabanı hazır: analiz_kayitlari tablosu kontrol edildi ve indeks eklendi.")
 
     except Exception as e:
         print("Veritabanı oluşturma hatası:", e)
 
 
 veritabani_olustur()
-
-
-def analiz_kayitlarini_getir(limit=10):
-    """Son analiz kayıtlarını SQLite veritabanından getirir."""
-    try:
-        conn = sqlite3.connect(db_yolu)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT
-                sehir,
-                ilce,
-                mahalle,
-                risk_sonucu,
-                risk_skoru,
-                zemin_riski,
-                tarih
-            FROM analiz_kayitlari
-            ORDER BY id DESC
-            LIMIT ?
-        """, (limit,))
-
-        kayitlar = cursor.fetchall()
-        conn.close()
-        return kayitlar
-
-    except Exception as e:
-        print("Analiz kayıtları okuma hatası:", e)
-        return []
 
 
 def normalize_text(text):
@@ -97,19 +69,18 @@ def turkce_sirala(liste):
 
 
 def gorunum_duzelt(text):
-    """KONYA / konya gibi değerleri kullanıcıya Türkçe karakterleri bozmadan gösterir."""
+    """KONYA / konya gibi değerleri Türkçe karakterleri bozmadan düzgün gösterir."""
     text = str(text).strip()
 
     if not text or text.lower() == "nan":
         return ""
 
-    # Türkçe karakterlerde .title() bazen Gazİantep gibi bozulmalara yol açabildiği için
-    # şehir/ilçe adlarını kelime kelime güvenli biçimde düzenliyoruz.
-    text = text.replace("i̇", "i")
+    # Büyük/küçük harf dönüşümünde Türkçe karakterleri korumak için
+    # Python'un title() fonksiyonu yerine özel dönüşüm kullanıyoruz.
+    text = text.replace("I", "ı").replace("İ", "i")
     text = text.lower()
 
     kelimeler = []
-
     for kelime in text.split():
         if kelime:
             kelimeler.append(kelime[0].upper() + kelime[1:])
@@ -293,7 +264,7 @@ def acil_oneriler_uret(risk_durumu, inputs):
             "Bu bölgede acil tahliye planı oluşturulmalıdır.",
             "Toplanma alanı kapasitesi artırılmalıdır.",
             "Eski yapılar için bina dayanıklılık analizi ve güçlendirme önerilir.",
-            "Hastane, itfaiye ve ana ulaşım yolları önceliklendirilmelidir."
+            "Hastane, itfaiye og ana ulaşım yolları önceliklendirilmelidir."
         ])
 
     if bina_yasi >= 25:
@@ -450,10 +421,31 @@ def index():
     alarm_mesaji = ""
     analiz_yapildi = False
 
-    # Şehir listesi ana veri CSV dosyasından alınır.
-    # SQLite burada yalnızca analiz kayıtlarını tutmak için kullanılır.
+    # Şehir listesi eski afet verisi tablosundan alınabilir.
+    # Ancak Render ortamında bu tablo yoksa hata vermeden CSV yedeğine geçilir.
+    if os.path.exists(db_yolu):
+        try:
+            conn = sqlite3.connect(db_yolu)
+            cursor = conn.cursor()
 
-    # Ana veri CSV dosyası yedek olarak kullanılır.
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='afet_verileri'
+            """)
+            tablo_var = cursor.fetchone() is not None
+
+            if tablo_var:
+                df = pd.read_sql_query("SELECT * FROM afet_verileri", conn)
+
+                if "Sehir" in df.columns:
+                    sehirler = tekil_ve_sirali(df["Sehir"].dropna().unique().tolist())
+
+            conn.close()
+
+        except Exception as e:
+            print("Veritabanı okuma hatası:", e)
+
+    # afet_verileri tablosu yoksa veya şehir listesi boşsa CSV yedek olarak kullanılır.
     if not sehirler and os.path.exists(data_yolu):
         try:
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
@@ -512,7 +504,7 @@ def index():
 
     tum_depremler = canlı_depremleri_getir()
 
-    # Üst canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
+    # Üst canlı deprem alanında sadece 4.0 og üzeri depremler gösterilir.
     ust_depremler = [
         d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4
@@ -741,55 +733,6 @@ def index():
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
-    analiz_kayitlari = analiz_kayitlarini_getir(limit=10)
-
-    if analiz_kayitlari:
-        kayit_satirlari = ""
-
-        for kayit in analiz_kayitlari:
-            sehir, ilce, mahalle, risk_sonucu, risk_skoru_db, zemin_riski_db, tarih = kayit
-            kayit_satirlari += f"""
-                <tr>
-                    <td>{sehir or '-'}</td>
-                    <td>{ilce or '-'}</td>
-                    <td>{mahalle or '-'}</td>
-                    <td>{risk_sonucu or '-'}</td>
-                    <td>{risk_skoru_db if risk_skoru_db is not None else '-'}</td>
-                    <td>{zemin_riski_db if zemin_riski_db is not None else '-'}</td>
-                    <td>{tarih or '-'}</td>
-                </tr>
-            """
-
-        kayitlar_html = f"""
-            <div class="db-history-box">
-                <h3>💾 Veritabanına Kaydedilen Son Analizler</h3>
-                <p>Bu tablo, SQLite veritabanındaki <b>analiz_kayitlari</b> tablosundan alınır.</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Şehir</th>
-                            <th>İlçe</th>
-                            <th>Mahalle</th>
-                            <th>Risk Sonucu</th>
-                            <th>Risk Skoru</th>
-                            <th>Zemin Riski</th>
-                            <th>Tarih</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {kayit_satirlari}
-                    </tbody>
-                </table>
-            </div>
-        """
-    else:
-        kayitlar_html = """
-            <div class="db-history-box">
-                <h3>💾 Veritabanı Kayıtları</h3>
-                <p>Henüz kayıt yok. İlk analizden sonra sonuçlar burada görünecek.</p>
-            </div>
-        """
-
     if tum_depremler:
         deprem_listesi_html = "".join([
             f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
@@ -984,36 +927,6 @@ def index():
                 border-left:6px solid #27ae60;
                 border-radius:12px;
                 line-height:1.5;
-            }}
-
-            .db-history-box {{
-                margin-top:20px;
-                padding:18px;
-                background:rgba(255,255,255,0.08);
-                color:var(--text);
-                border-radius:12px;
-                border:1px solid var(--border);
-                overflow-x:auto;
-            }}
-
-            .db-history-box table {{
-                width:100%;
-                border-collapse:collapse;
-                margin-top:12px;
-                min-width:760px;
-            }}
-
-            .db-history-box th,
-            .db-history-box td {{
-                border:1px solid rgba(95,177,255,0.25);
-                padding:10px;
-                text-align:left;
-                font-size:14px;
-            }}
-
-            .db-history-box th {{
-                background:rgba(0,194,255,0.12);
-                color:#dff6ff;
             }}
 
             .accessibility-note {{
@@ -1495,7 +1408,7 @@ def index():
 
                     <h2>Güvenliğiniz için konumunuzu kullanıyoruz.</h2>
                     <p>
-                        4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkileniyorsa sizi uyarır,
+                        4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkilenebiliyorsa sizi uyarır,
                         uzak depremler için gereksiz alarm vermez.
                     </p>
 
@@ -1645,7 +1558,7 @@ def index():
                 </select>
 
                 <label for="mahalle">Mahalle Seçiniz</label>
-                <select id="mahalle" name="mahalle" onchange="mahalleSecimSesliBildir()">
+                <select id="mahalle" name="mahalle">
                     {mahalle_options}
                 </select>
 
@@ -1745,8 +1658,6 @@ def index():
                 <p>{aciklama}</p>
             </section>
 
-            {kayitlar_html}
-
             <button
                 type="button"
                 onclick="acilDurumGoster()"
@@ -1765,12 +1676,12 @@ def index():
                 <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
                 ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
                 ✅ Mobil cihazlarda titreşim desteği<br>
-                ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde çalışan ve ayarlardan kapatılabilen Türkçe sesli yönlendirme<br>
+                ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde çalışan og ayarlardan kapatılabilen Türkçe sesli yönlendirme<br>
                 ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
             </div>
-</div>
+        </div>
         </main>
 
         <script>
@@ -1854,7 +1765,55 @@ def index():
                 }}
             }}
 
-            function girisSesliAciklama(kaynak) {{
+            // GÜNCELLEME: Akıllı Sesli Asistan Dinleme Fonksiyonu (Speech-to-Text) eklendi
+            function otomatikSesliAsistanBaslat() {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                    console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
+                    return;
+                }
+
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'tr-TR';
+
+                recognition.onresult = function(event) {
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            const komut = event.results[i][0].transcript.trim().toLowerCase();
+                            console.log("Algılanan Komut:", komut);
+
+                            if (komut.includes("analiz ekranı")) {
+                                detayliAnalizeGec();
+                            } else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat")) {
+                                acilDurumKapat();
+                            }
+                        }
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    console.error("Ses tanıma hatası:", event.error);
+                };
+
+                recognition.onend = function() {
+                    // Bağlantı koparsa veya durursa arka planda sürekli dinlemeyi sürdürmesi için tekrar başlatır
+                    if (sesliYonlendirmeAcikMi()) {
+                        try { recognition.start(); } catch(e) {}
+                    }
+                };
+
+                try {
+                    recognition.start();
+                    console.log("Akıllı sesli asistan sürekli dinleme modunda aktif.");
+                } catch(e) {
+                    console.error("Ses tanıma başlatılamadı:", e);
+                }
+            }
+
+            // GÜNCELLEME: girisSesliAciklama fonksiyonu sesli selamlama bittiğinde asistanı otomatik tetikler
+            function girisSesliAciklama(kaynak) {
 
                 if (!sesliYonlendirmeAcikMi()) {{
                     return;
@@ -1868,13 +1827,9 @@ def index():
                     "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
                     "Sesli yönlendirme varsayılan olarak açıktır. İsterseniz ayarlar kısmındaki sesli yönlendirme düğmesinden bu özelliği kapatabilirsiniz. " +
                     "Bu rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
-                    "Klavyenizdeki Tab tuşuna bastığınızda sıradaki seçeneğe geçersiniz ve o seçeneğin adı sesli olarak okunur. " +
-                    "Shift tuşunu basılı tutup Tab'a basarsanız önceki seçeneğe dönersiniz. " +
-                    "Bir seçeneği etkinleştirmek için Enter tuşuna basabilirsiniz. " +
                     "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
                     "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
                     "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
-                    "Ayrıca analiz ekranı veya uyarıyı kapat diyerek sesli komutla da işlem yapabilirsiniz. " +
                     "Açıklama şimdi ikinci kez tekrar edilecektir.";
 
                 if ("speechSynthesis" in window) {{
@@ -1891,21 +1846,25 @@ def index():
                     mesaj2.rate = 0.9;
                     mesaj2.pitch = 1;
 
+                    // İlk selamlama bittiğinde ikinciyi oku, o da bittiğinde otomatik sürekli dinlemeyi başlat
                     mesaj1.onend = function () {{
                         setTimeout(() => {{
                             if (sesliYonlendirmeAcikMi()) {{
                                 window.speechSynthesis.speak(mesaj2);
-                            }}
+                            }} else {
+                                otomatikSesliAsistanBaslat();
+                            }
                         }}, 700);
                     }};
 
-                    mesaj2.onend = function () {{
-                        sesliKomutDinlemeyiBaslat();
-                    }};
+                    mesaj2.onend = function () {
+                        // Sesli selamlama tamamen bittiği an asistanı tetikler (Buton basılmasını beklemez)
+                        otomatikSesliAsistanBaslat();
+                    };
 
                     window.speechSynthesis.speak(mesaj1);
                 }}
-            }}
+            }
 
             function ilkEtkilesimdeSesliRehberiBaslat() {{
                 if (!sesliYonlendirmeAcikMi()) {{
@@ -1918,239 +1877,6 @@ def index():
 
                 girisSesliAciklama('firstInteraction');
             }}
-
-            // ---- Akıllı Sesli Komut Dinleme (Speech-to-Text) ----
-            // Sesli selamlama bittiğinde otomatik olarak sürekli dinleme moduna geçer.
-            // Kullanıcı "analiz ekranı" dediğinde detayliAnalizeGec(),
-            // "uyarıyı kapat" veya "alarmı kapat" dediğinde acilDurumKapat() çalışır.
-            let sesliKomutTanima = null;
-            let sesliKomutDinlemeAktif = false;
-            let sesliKomutYenidenBaslatZamanlayici = null;
-
-            function sesliKomutTanimaMevcutMu() {{
-                return ("webkitSpeechRecognition" in window) || ("SpeechRecognition" in window);
-            }}
-
-            function sesliKomutIsleVeCalistir(transkript) {{
-                const metin = transkript.toLowerCase().trim();
-
-                if (metin.indexOf("analiz ekranı") !== -1 || metin.indexOf("analiz ekrani") !== -1) {{
-                    detayliAnalizeGec();
-                    return;
-                }}
-
-                if (
-                    metin.indexOf("uyarıyı kapat") !== -1 ||
-                    metin.indexOf("uyariyi kapat") !== -1 ||
-                    metin.indexOf("alarmı kapat") !== -1 ||
-                    metin.indexOf("alarmi kapat") !== -1
-                ) {{
-                    acilDurumKapat();
-                    return;
-                }}
-            }}
-
-            function sesliKomutDinlemeyiBaslat() {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if (!sesliKomutTanimaMevcutMu()) {{
-                    console.log("Bu tarayıcıda sesli komut tanıma (webkitSpeechRecognition) desteklenmiyor.");
-                    return;
-                }}
-
-                if (sesliKomutDinlemeAktif) {{
-                    return;
-                }}
-
-                try {{
-                    const TanimaMotoru = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    sesliKomutTanima = new TanimaMotoru();
-                    sesliKomutTanima.lang = "tr-TR";
-                    sesliKomutTanima.continuous = true;
-                    sesliKomutTanima.interimResults = false;
-
-                    sesliKomutTanima.onstart = function () {{
-                        sesliKomutDinlemeAktif = true;
-                        console.log("Akıllı sesli asistan dinlemeye başladı.");
-                    }};
-
-                    sesliKomutTanima.onresult = function (event) {{
-                        for (let i = event.resultIndex; i < event.results.length; i++) {{
-                            if (event.results[i].isFinal) {{
-                                const soylenen = event.results[i][0].transcript;
-                                sesliKomutIsleVeCalistir(soylenen);
-                            }}
-                        }}
-                    }};
-
-                    sesliKomutTanima.onerror = function (event) {{
-                        console.log("Sesli komut tanıma hatası:", event.error);
-                    }};
-
-                    // Tarayıcı dinlemeyi kendiliğinden durdurursa (zaman aşımı, sessizlik vb.)
-                    // sesli yönlendirme hâlâ açıksa otomatik olarak yeniden başlatılır.
-                    sesliKomutTanima.onend = function () {{
-                        sesliKomutDinlemeAktif = false;
-
-                        if (sesliYonlendirmeAcikMi()) {{
-                            clearTimeout(sesliKomutYenidenBaslatZamanlayici);
-                            sesliKomutYenidenBaslatZamanlayici = setTimeout(function () {{
-                                sesliKomutDinlemeyiBaslat();
-                            }}, 800);
-                        }}
-                    }};
-
-                    sesliKomutTanima.start();
-
-                }} catch (e) {{
-                    console.log("Sesli komut dinleme başlatma hatası:", e);
-                }}
-            }}
-
-            function sesliKomutDinlemeyiDurdur() {{
-                clearTimeout(sesliKomutYenidenBaslatZamanlayici);
-
-                if (sesliKomutTanima) {{
-                    try {{
-                        sesliKomutTanima.onend = null;
-                        sesliKomutTanima.stop();
-                    }} catch (e) {{
-                        console.log("Sesli komut dinleme durdurma hatası:", e);
-                    }}
-                }}
-
-                sesliKomutDinlemeAktif = false;
-            }}
-            // ---- Akıllı Sesli Komut Dinleme sonu ----
-
-            // ---- Konuşan Fokus Modu (Klavyeyle Gezinme Sesli Yönlendirmesi) ----
-            // Kullanıcı Tab / Shift+Tab ile gezindiğinde odaklanılan her buton,
-            // bağlantı, açılır liste veya giriş alanının adı ve türü otomatik olarak
-            // sesli okunur. Böylece görme engelli bir kullanıcı hangi seçeneğe
-            // geldiğini ve ne yapması gerektiğini (Enter ile seçim gibi) duyarak anlar.
-            let fokusKonusmaZamanlayici = null;
-            let sonOkunanFokusElemani = null;
-
-            function elemanTuruAciklamasiGetir(el) {{
-                const tag = el.tagName.toLowerCase();
-
-                if (tag === "button") {{
-                    return "buton";
-                }}
-
-                if (tag === "a") {{
-                    return "bağlantı";
-                }}
-
-                if (tag === "select") {{
-                    return "açılır liste";
-                }}
-
-                if (tag === "input") {{
-                    const tip = (el.getAttribute("type") || "text").toLowerCase();
-
-                    if (tip === "number") {{
-                        return "sayı giriş alanı";
-                    }}
-
-                    return "giriş alanı";
-                }}
-
-                if (tag === "textarea") {{
-                    return "metin giriş alanı";
-                }}
-
-                return "";
-            }}
-
-            function elemanAciklamasiniGetir(el) {{
-                if (!el) {{
-                    return "";
-                }}
-
-                let isim = el.getAttribute("aria-label");
-
-                if (!isim && el.id) {{
-                    const etiket = document.querySelector('label[for="' + el.id + '"]');
-                    if (etiket) {{
-                        isim = etiket.textContent.trim();
-                    }}
-                }}
-
-                if (!isim) {{
-                    const metinIcerik = el.textContent ? el.textContent.trim() : "";
-                    if (metinIcerik && metinIcerik.length < 80) {{
-                        isim = metinIcerik;
-                    }}
-                }}
-
-                if (!isim) {{
-                    isim = el.getAttribute("placeholder") || "";
-                }}
-
-                if (!isim) {{
-                    isim = "isimsiz öğe";
-                }}
-
-                const tur = elemanTuruAciklamasiGetir(el);
-
-                let seciliDeger = "";
-
-                if (el.tagName.toLowerCase() === "select" && el.value) {{
-                    const secilenOption = el.options[el.selectedIndex];
-                    if (secilenOption && secilenOption.value) {{
-                        seciliDeger = ", seçili değer: " + secilenOption.textContent.trim();
-                    }}
-                }}
-
-                return tur ? (isim + ", " + tur + seciliDeger) : isim;
-            }}
-
-            function fokusEdilenElemaniSesliOku(el) {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if (!el || el === sonOkunanFokusElemani) {{
-                    return;
-                }}
-
-                sonOkunanFokusElemani = el;
-
-                const aciklama = elemanAciklamasiniGetir(el);
-
-                if (!aciklama) {{
-                    return;
-                }}
-
-                clearTimeout(fokusKonusmaZamanlayici);
-
-                fokusKonusmaZamanlayici = setTimeout(() => {{
-                    if ("speechSynthesis" in window) {{
-                        const mesaj = new SpeechSynthesisUtterance(aciklama);
-                        mesaj.lang = "tr-TR";
-                        mesaj.rate = 1;
-                        mesaj.pitch = 1;
-                        window.speechSynthesis.cancel();
-                        window.speechSynthesis.speak(mesaj);
-                    }}
-                }}, 120);
-            }}
-
-            function konusanFokusModunuBaslat() {{
-                const odaklanabilirSecici = "button, a[href], select, input, textarea, [tabindex]";
-
-                document.addEventListener("focusin", function (event) {{
-                    const el = event.target;
-
-                    if (el && el.matches && el.matches(odaklanabilirSecici)) {{
-                        fokusEdilenElemaniSesliOku(el);
-                    }}
-                }});
-            }}
-            // ---- Konuşan Fokus Modu sonu ----
 
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
@@ -2279,10 +2005,6 @@ def index():
                 const secilenSehir = sehirSelect.value;
                 const ilceler = (ilceVerileri[secilenSehir] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
-                if (secilenSehir) {{
-                    sesliBilgi("Şehir seçildi: " + secilenSehir + ". Şimdi ilçe seçebilirsiniz.");
-                }}
-
                 ilceSelect.innerHTML = "";
 
                 if (mahalleSelect) {{
@@ -2334,10 +2056,6 @@ def index():
                 const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
                 const mahalleler = (mahalleVerileri[anahtar] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
-                if (ilceSelect.value) {{
-                    sesliBilgi("İlçe seçildi: " + ilceSelect.value + ". Şimdi mahalle seçebilirsiniz.");
-                }}
-
                 mahalleSelect.innerHTML = "";
 
                 if (mahalleler.length === 0) {{
@@ -2359,14 +2077,6 @@ def index():
                     option.textContent = mahalle;
                     mahalleSelect.appendChild(option);
                 }});
-            }}
-
-            function mahalleSecimSesliBildir() {{
-                const mahalleSelect = document.getElementById("mahalle");
-
-                if (mahalleSelect && mahalleSelect.value) {{
-                    sesliBilgi("Mahalle seçildi: " + mahalleSelect.value + ". Formdaki diğer alanları doldurabilirsiniz.");
-                }}
             }}
 
             function sesliUyariVer() {{
@@ -2410,6 +2120,7 @@ def index():
                 }}
             }}
 
+            // GÜNCELLEME: window.onload içindeki otomatik ses mekanizması asistan tetikleyicisiyle senkronize edildi
             window.onload = function () {{
 
                 // Splash ekranı yalnızca telefon ekranında çalışır.
@@ -2432,16 +2143,9 @@ def index():
 
                 sesliYonlendirmeButonunuGuncelle();
 
-                // Konuşan Fokus Modu en başından etkinleştirilir. Sesli karşılama,
-                // tarayıcı politikası nedeniyle ilk etkileşime kadar gecikse de,
-                // kullanıcı ilk Tab tuşuna bastığı anda odaklanılan öğe sesli okunur.
-                konusanFokusModunuBaslat();
-
                 // Sesli yönlendirme varsayılan olarak açıktır.
                 // Tarayıcı izin verirse girişte otomatik başlar.
                 // Telefon otomatik sesi engellerse kullanıcının ekrana ilk dokunuşunda başlar.
-                // Selamlama bittiğinde (girisSesliAciklama içindeki mesaj2.onend) akıllı sesli
-                // asistan otomatik olarak sürekli dinleme moduna geçer; buton beklenmez.
                 setTimeout(() => {{
                     if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
                         girisSesliAciklama('auto');
@@ -2481,6 +2185,93 @@ def index():
             }};
         </script>
 
+    </body>
+    </html>
+    """
+
+    return make_response(html)
+
+
+@app.route("/gecmis")
+def gecmis():
+    """SQLite veritabanına kaydedilen analiz geçmişini gösterir."""
+    try:
+        conn = sqlite3.connect(db_yolu)
+        df = pd.read_sql_query("""
+            SELECT
+                id,
+                sehir,
+                ilce,
+                mahalle,
+                risk_sonucu,
+                risk_skoru,
+                zemin_riski,
+                tarih
+            FROM analiz_kayitlari
+            ORDER BY id DESC
+        """, conn)
+        conn.close()
+
+        if df.empty:
+            tablo_html = "<p>Henüz kayıtlı analiz sonucu bulunmuyor.</p>"
+        else:
+            tablo_html = df.to_html(index=False, classes="history-table", border=0)
+
+    except Exception as e:
+        tablo_html = f"<p>Veritabanı okunurken hata oluştu: {e}</p>"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>RiskAtlas Analiz Geçmişi</title>
+        <style>
+            body {{
+                background:#06111f;
+                color:#eaf4ff;
+                font-family:Arial, sans-serif;
+                padding:20px;
+            }}
+            .box {{
+                max-width:1200px;
+                margin:auto;
+                background:rgba(12,29,52,0.92);
+                border:1px solid rgba(95,177,255,0.25);
+                border-radius:18px;
+                padding:22px;
+                overflow-x:auto;
+            }}
+            a {{
+                color:#00c2ff;
+                text-decoration:none;
+                font-weight:bold;
+            }}
+            table {{
+                width:100%;
+                border-collapse:collapse;
+                margin-top:18px;
+            }}
+            th, td {{
+                border:1px solid rgba(95,177,255,0.25);
+                padding:10px;
+                text-align:left;
+            }}
+            th {{
+                background:#0b1e35;
+            }}
+            tr:nth-child(even) {{
+                background:rgba(255,255,255,0.04);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h1>📋 RiskAtlas Analiz Geçmişi</h1>
+            <p><a href="/">← Ana sayfaya dön</a></p>
+            {tablo_html}
+        </div>
     </body>
     </html>
     """

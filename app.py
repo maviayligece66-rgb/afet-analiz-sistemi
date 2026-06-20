@@ -43,7 +43,7 @@ def veritabani_olustur():
             )
         """)
         
-        # GÜNCELLEME: sehir sütununa ait arama indeksi eklendi
+        # sehir sütununa ait arama indeksi eklendi
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
 
         conn.commit()
@@ -264,7 +264,7 @@ def acil_oneriler_uret(risk_durumu, inputs):
             "Bu bölgede acil tahliye planı oluşturulmalıdır.",
             "Toplanma alanı kapasitesi artırılmalıdır.",
             "Eski yapılar için bina dayanıklılık analizi ve güçlendirme önerilir.",
-            "Hastane, itfaiye og ana ulaşım yolları önceliklendirilmelidir."
+            "Hastane, itfaiye ve ana ulaşım yolları önceliklendirilmelidir."
         ])
 
     if bina_yasi >= 25:
@@ -504,7 +504,7 @@ def index():
 
     tum_depremler = canlı_depremleri_getir()
 
-    # Üst canlı deprem alanında sadece 4.0 og üzeri depremler gösterilir.
+    # Üst canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
     ust_depremler = [
         d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4
@@ -1416,7 +1416,7 @@ def index():
                         <button
                             type="button"
                             onclick="konumModunuBaslat()"
-                            aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat"
+                            aria-label="Konumumu kullan og yakın deprem uyarılarını başlat"
                         >
                             📍 Konumumu Kullan
                         </button>
@@ -1679,7 +1679,7 @@ def index():
                 ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde çalışan og ayarlardan kapatılabilen Türkçe sesli yönlendirme<br>
                 ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
-                ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı
+                ✅ Büyük yazı og yüksek kontrastlı acil durum ekranı
             </div>
         </div>
         </main>
@@ -1765,12 +1765,12 @@ def index():
                 }}
             }}
 
-            // GÜNCELLEME: Akıllı Sesli Asistan Dinleme Fonksiyonu (Speech-to-Text) eklendi
-            function otomatikSesliAsistanBaslat() {
-                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            // AKILLI SESLİ ASİSTAN SÜREKLİ DİNLEME MODU (Çift Süslü Parantez Düzenlemesi)
+            function otomatikSesliAsistanBaslat() {{
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                     console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
                     return;
-                }
+                }}
 
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 const recognition = new SpeechRecognition();
@@ -1778,42 +1778,41 @@ def index():
                 recognition.interimResults = false;
                 recognition.lang = 'tr-TR';
 
-                recognition.onresult = function(event) {
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
+                recognition.onresult = function(event) {{
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {{
+                        if (event.results[i].isFinal) {{
                             const komut = event.results[i][0].transcript.trim().toLowerCase();
                             console.log("Algılanan Komut:", komut);
 
-                            if (komut.includes("analiz ekranı")) {
+                            if (komut.includes("analiz ekranı")) {{
                                 detayliAnalizeGec();
-                            } else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat")) {
+                            }} else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat")) {{
                                 acilDurumKapat();
-                            }
-                        }
-                    }
-                };
+                            }}
+                        }}
+                    }}
+                }};
 
-                recognition.onerror = function(event) {
+                recognition.onerror = function(event) {{
                     console.error("Ses tanıma hatası:", event.error);
-                };
+                }};
 
-                recognition.onend = function() {
-                    // Bağlantı koparsa veya durursa arka planda sürekli dinlemeyi sürdürmesi için tekrar başlatır
-                    if (sesliYonlendirmeAcikMi()) {
-                        try { recognition.start(); } catch(e) {}
-                    }
-                };
+                recognition.onend = function() {{
+                    if (sesliYonlendirmeAcikMi()) {{
+                        try {{ recognition.start(); }} catch(e) {{}}
+                    }}
+                }};
 
-                try {
+                try {{
                     recognition.start();
                     console.log("Akıllı sesli asistan sürekli dinleme modunda aktif.");
-                } catch(e) {
+                }} catch(e) {{
                     console.error("Ses tanıma başlatılamadı:", e);
-                }
-            }
+                }}
+            }}
 
-            // GÜNCELLEME: girisSesliAciklama fonksiyonu sesli selamlama bittiğinde asistanı otomatik tetikler
-            function girisSesliAciklama(kaynak) {
+            // SESLİ SELAMLAMA VE ASİSTAN TETİKLEME (Çift Süslü Parantez Düzenlemesi)
+            function girisSesliAciklama(kaynak) {{
 
                 if (!sesliYonlendirmeAcikMi()) {{
                     return;
@@ -1846,25 +1845,23 @@ def index():
                     mesaj2.rate = 0.9;
                     mesaj2.pitch = 1;
 
-                    // İlk selamlama bittiğinde ikinciyi oku, o da bittiğinde otomatik sürekli dinlemeyi başlat
                     mesaj1.onend = function () {{
                         setTimeout(() => {{
                             if (sesliYonlendirmeAcikMi()) {{
                                 window.speechSynthesis.speak(mesaj2);
-                            }} else {
+                            }} else {{
                                 otomatikSesliAsistanBaslat();
-                            }
+                            }}
                         }}, 700);
                     }};
 
-                    mesaj2.onend = function () {
-                        // Sesli selamlama tamamen bittiği an asistanı tetikler (Buton basılmasını beklemez)
+                    mesaj2.onend = function () {{
                         otomatikSesliAsistanBaslat();
-                    };
+                    }};
 
                     window.speechSynthesis.speak(mesaj1);
                 }}
-            }
+            }}
 
             function ilkEtkilesimdeSesliRehberiBaslat() {{
                 if (!sesliYonlendirmeAcikMi()) {{
@@ -2120,10 +2117,8 @@ def index():
                 }}
             }}
 
-            // GÜNCELLEME: window.onload içindeki otomatik ses mekanizması asistan tetikleyicisiyle senkronize edildi
             window.onload = function () {{
 
-                // Splash ekranı yalnızca telefon ekranında çalışır.
                 if (window.innerWidth <= 700) {{
                     setTimeout(function () {{
                         const splash = document.getElementById("splash-screen");
@@ -2143,9 +2138,6 @@ def index():
 
                 sesliYonlendirmeButonunuGuncelle();
 
-                // Sesli yönlendirme varsayılan olarak açıktır.
-                // Tarayıcı izin verirse girişte otomatik başlar.
-                // Telefon otomatik sesi engellerse kullanıcının ekrana ilk dokunuşunda başlar.
                 setTimeout(() => {{
                     if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
                         girisSesliAciklama('auto');

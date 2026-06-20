@@ -43,6 +43,8 @@ def veritabani_olustur():
             )
         """)
 
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
+
         conn.commit()
         conn.close()
         print("Veritabanı hazır: analiz_kayitlari tablosu kontrol edildi.")
@@ -1893,6 +1895,10 @@ def index():
                         }}, 700);
                     }};
 
+                    mesaj2.onend = function () {{
+                        sesliKomutDinlemeyiBaslat();
+                    }};
+
                     window.speechSynthesis.speak(mesaj1);
                 }}
             }}
@@ -1908,6 +1914,112 @@ def index():
 
                 girisSesliAciklama('firstInteraction');
             }}
+
+            // ---- Akıllı Sesli Komut Dinleme (Speech-to-Text) ----
+            // Sesli selamlama bittiğinde otomatik olarak sürekli dinleme moduna geçer.
+            // Kullanıcı "analiz ekranı" dediğinde detayliAnalizeGec(),
+            // "uyarıyı kapat" veya "alarmı kapat" dediğinde acilDurumKapat() çalışır.
+            let sesliKomutTanima = null;
+            let sesliKomutDinlemeAktif = false;
+            let sesliKomutYenidenBaslatZamanlayici = null;
+
+            function sesliKomutTanimaMevcutMu() {{
+                return ("webkitSpeechRecognition" in window) || ("SpeechRecognition" in window);
+            }}
+
+            function sesliKomutIsleVeCalistir(transkript) {{
+                const metin = transkript.toLowerCase().trim();
+
+                if (metin.indexOf("analiz ekranı") !== -1 || metin.indexOf("analiz ekrani") !== -1) {{
+                    detayliAnalizeGec();
+                    return;
+                }}
+
+                if (
+                    metin.indexOf("uyarıyı kapat") !== -1 ||
+                    metin.indexOf("uyariyi kapat") !== -1 ||
+                    metin.indexOf("alarmı kapat") !== -1 ||
+                    metin.indexOf("alarmi kapat") !== -1
+                ) {{
+                    acilDurumKapat();
+                    return;
+                }}
+            }}
+
+            function sesliKomutDinlemeyiBaslat() {{
+                if (!sesliYonlendirmeAcikMi()) {{
+                    return;
+                }}
+
+                if (!sesliKomutTanimaMevcutMu()) {{
+                    console.log("Bu tarayıcıda sesli komut tanıma (webkitSpeechRecognition) desteklenmiyor.");
+                    return;
+                }}
+
+                if (sesliKomutDinlemeAktif) {{
+                    return;
+                }}
+
+                try {{
+                    const TanimaMotoru = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    sesliKomutTanima = new TanimaMotoru();
+                    sesliKomutTanima.lang = "tr-TR";
+                    sesliKomutTanima.continuous = true;
+                    sesliKomutTanima.interimResults = false;
+
+                    sesliKomutTanima.onstart = function () {{
+                        sesliKomutDinlemeAktif = true;
+                        console.log("Akıllı sesli asistan dinlemeye başladı.");
+                    }};
+
+                    sesliKomutTanima.onresult = function (event) {{
+                        for (let i = event.resultIndex; i < event.results.length; i++) {{
+                            if (event.results[i].isFinal) {{
+                                const soylenen = event.results[i][0].transcript;
+                                sesliKomutIsleVeCalistir(soylenen);
+                            }}
+                        }}
+                    }};
+
+                    sesliKomutTanima.onerror = function (event) {{
+                        console.log("Sesli komut tanıma hatası:", event.error);
+                    }};
+
+                    // Tarayıcı dinlemeyi kendiliğinden durdurursa (zaman aşımı, sessizlik vb.)
+                    // sesli yönlendirme hâlâ açıksa otomatik olarak yeniden başlatılır.
+                    sesliKomutTanima.onend = function () {{
+                        sesliKomutDinlemeAktif = false;
+
+                        if (sesliYonlendirmeAcikMi()) {{
+                            clearTimeout(sesliKomutYenidenBaslatZamanlayici);
+                            sesliKomutYenidenBaslatZamanlayici = setTimeout(function () {{
+                                sesliKomutDinlemeyiBaslat();
+                            }}, 800);
+                        }}
+                    }};
+
+                    sesliKomutTanima.start();
+
+                }} catch (e) {{
+                    console.log("Sesli komut dinleme başlatma hatası:", e);
+                }}
+            }}
+
+            function sesliKomutDinlemeyiDurdur() {{
+                clearTimeout(sesliKomutYenidenBaslatZamanlayici);
+
+                if (sesliKomutTanima) {{
+                    try {{
+                        sesliKomutTanima.onend = null;
+                        sesliKomutTanima.stop();
+                    }} catch (e) {{
+                        console.log("Sesli komut dinleme durdurma hatası:", e);
+                    }}
+                }}
+
+                sesliKomutDinlemeAktif = false;
+            }}
+            // ---- Akıllı Sesli Komut Dinleme sonu ----
 
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
@@ -2176,6 +2288,8 @@ def index():
                 // Sesli yönlendirme varsayılan olarak açıktır.
                 // Tarayıcı izin verirse girişte otomatik başlar.
                 // Telefon otomatik sesi engellerse kullanıcının ekrana ilk dokunuşunda başlar.
+                // Selamlama bittiğinde (girisSesliAciklama içindeki mesaj2.onend) akıllı sesli
+                // asistan otomatik olarak sürekli dinleme moduna geçer; buton beklenmez.
                 setTimeout(() => {{
                     if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
                         girisSesliAciklama('auto');

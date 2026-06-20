@@ -1645,7 +1645,7 @@ def index():
                 </select>
 
                 <label for="mahalle">Mahalle Seçiniz</label>
-                <select id="mahalle" name="mahalle">
+                <select id="mahalle" name="mahalle" onchange="mahalleSecimSesliBildir()">
                     {mahalle_options}
                 </select>
 
@@ -1868,9 +1868,13 @@ def index():
                     "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
                     "Sesli yönlendirme varsayılan olarak açıktır. İsterseniz ayarlar kısmındaki sesli yönlendirme düğmesinden bu özelliği kapatabilirsiniz. " +
                     "Bu rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
+                    "Klavyenizdeki Tab tuşuna bastığınızda sıradaki seçeneğe geçersiniz ve o seçeneğin adı sesli olarak okunur. " +
+                    "Shift tuşunu basılı tutup Tab'a basarsanız önceki seçeneğe dönersiniz. " +
+                    "Bir seçeneği etkinleştirmek için Enter tuşuna basabilirsiniz. " +
                     "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
                     "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
                     "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
+                    "Ayrıca analiz ekranı veya uyarıyı kapat diyerek sesli komutla da işlem yapabilirsiniz. " +
                     "Açıklama şimdi ikinci kez tekrar edilecektir.";
 
                 if ("speechSynthesis" in window) {{
@@ -2021,6 +2025,133 @@ def index():
             }}
             // ---- Akıllı Sesli Komut Dinleme sonu ----
 
+            // ---- Konuşan Fokus Modu (Klavyeyle Gezinme Sesli Yönlendirmesi) ----
+            // Kullanıcı Tab / Shift+Tab ile gezindiğinde odaklanılan her buton,
+            // bağlantı, açılır liste veya giriş alanının adı ve türü otomatik olarak
+            // sesli okunur. Böylece görme engelli bir kullanıcı hangi seçeneğe
+            // geldiğini ve ne yapması gerektiğini (Enter ile seçim gibi) duyarak anlar.
+            let fokusKonusmaZamanlayici = null;
+            let sonOkunanFokusElemani = null;
+
+            function elemanTuruAciklamasiGetir(el) {{
+                const tag = el.tagName.toLowerCase();
+
+                if (tag === "button") {{
+                    return "buton";
+                }}
+
+                if (tag === "a") {{
+                    return "bağlantı";
+                }}
+
+                if (tag === "select") {{
+                    return "açılır liste";
+                }}
+
+                if (tag === "input") {{
+                    const tip = (el.getAttribute("type") || "text").toLowerCase();
+
+                    if (tip === "number") {{
+                        return "sayı giriş alanı";
+                    }}
+
+                    return "giriş alanı";
+                }}
+
+                if (tag === "textarea") {{
+                    return "metin giriş alanı";
+                }}
+
+                return "";
+            }}
+
+            function elemanAciklamasiniGetir(el) {{
+                if (!el) {{
+                    return "";
+                }}
+
+                let isim = el.getAttribute("aria-label");
+
+                if (!isim && el.id) {{
+                    const etiket = document.querySelector('label[for="' + el.id + '"]');
+                    if (etiket) {{
+                        isim = etiket.textContent.trim();
+                    }}
+                }}
+
+                if (!isim) {{
+                    const metinIcerik = el.textContent ? el.textContent.trim() : "";
+                    if (metinIcerik && metinIcerik.length < 80) {{
+                        isim = metinIcerik;
+                    }}
+                }}
+
+                if (!isim) {{
+                    isim = el.getAttribute("placeholder") || "";
+                }}
+
+                if (!isim) {{
+                    isim = "isimsiz öğe";
+                }}
+
+                const tur = elemanTuruAciklamasiGetir(el);
+
+                let seciliDeger = "";
+
+                if (el.tagName.toLowerCase() === "select" && el.value) {{
+                    const secilenOption = el.options[el.selectedIndex];
+                    if (secilenOption && secilenOption.value) {{
+                        seciliDeger = ", seçili değer: " + secilenOption.textContent.trim();
+                    }}
+                }}
+
+                return tur ? (isim + ", " + tur + seciliDeger) : isim;
+            }}
+
+            function fokusEdilenElemaniSesliOku(el) {{
+                if (!sesliYonlendirmeAcikMi()) {{
+                    return;
+                }}
+
+                if (!el || el === sonOkunanFokusElemani) {{
+                    return;
+                }}
+
+                sonOkunanFokusElemani = el;
+
+                const aciklama = elemanAciklamasiniGetir(el);
+
+                if (!aciklama) {{
+                    return;
+                }}
+
+                clearTimeout(fokusKonusmaZamanlayici);
+
+                fokusKonusmaZamanlayici = setTimeout(() => {{
+                    if ("speechSynthesis" in window) {{
+                        const mesaj = new SpeechSynthesisUtterance(aciklama);
+                        mesaj.lang = "tr-TR";
+                        mesaj.rate = 1;
+                        mesaj.pitch = 1;
+                        window.speechSynthesis.cancel();
+                        window.speechSynthesis.speak(mesaj);
+                    }}
+                }}, 120);
+            }}
+
+            function konusanFokusModunuBaslat() {{
+                const odaklanabilirSecici = "button, a[href], select, input, textarea, [tabindex]";
+
+                document.addEventListener("focusin", function (event) {{
+                    const el = event.target;
+
+                    if (el && el.matches && el.matches(odaklanabilirSecici)) {{
+                        fokusEdilenElemaniSesliOku(el);
+                    }}
+                }});
+            }}
+            // ---- Konuşan Fokus Modu sonu ----
+
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
                 document.getElementById("mainContent").classList.add("active");
@@ -2148,6 +2279,10 @@ def index():
                 const secilenSehir = sehirSelect.value;
                 const ilceler = (ilceVerileri[secilenSehir] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
+                if (secilenSehir) {{
+                    sesliBilgi("Şehir seçildi: " + secilenSehir + ". Şimdi ilçe seçebilirsiniz.");
+                }}
+
                 ilceSelect.innerHTML = "";
 
                 if (mahalleSelect) {{
@@ -2199,6 +2334,10 @@ def index():
                 const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
                 const mahalleler = (mahalleVerileri[anahtar] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
+                if (ilceSelect.value) {{
+                    sesliBilgi("İlçe seçildi: " + ilceSelect.value + ". Şimdi mahalle seçebilirsiniz.");
+                }}
+
                 mahalleSelect.innerHTML = "";
 
                 if (mahalleler.length === 0) {{
@@ -2220,6 +2359,14 @@ def index():
                     option.textContent = mahalle;
                     mahalleSelect.appendChild(option);
                 }});
+            }}
+
+            function mahalleSecimSesliBildir() {{
+                const mahalleSelect = document.getElementById("mahalle");
+
+                if (mahalleSelect && mahalleSelect.value) {{
+                    sesliBilgi("Mahalle seçildi: " + mahalleSelect.value + ". Formdaki diğer alanları doldurabilirsiniz.");
+                }}
             }}
 
             function sesliUyariVer() {{
@@ -2284,6 +2431,11 @@ def index():
                 }}
 
                 sesliYonlendirmeButonunuGuncelle();
+
+                // Konuşan Fokus Modu en başından etkinleştirilir. Sesli karşılama,
+                // tarayıcı politikası nedeniyle ilk etkileşime kadar gecikse de,
+                // kullanıcı ilk Tab tuşuna bastığı anda odaklanılan öğe sesli okunur.
+                konusanFokusModunuBaslat();
 
                 // Sesli yönlendirme varsayılan olarak açıktır.
                 // Tarayıcı izin verirse girişte otomatik başlar.

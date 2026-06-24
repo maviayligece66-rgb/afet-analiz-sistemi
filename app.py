@@ -43,7 +43,7 @@ def veritabani_olustur():
             )
         """)
         
-        # sehir sütununa ait arama indeksi eklendi
+        # sehir sütununa ait arama indeksi
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
 
         conn.commit()
@@ -75,8 +75,6 @@ def gorunum_duzelt(text):
     if not text or text.lower() == "nan":
         return ""
 
-    # Büyük/küçük harf dönüşümünde Türkçe karakterleri korumak için
-    # Python'un title() fonksiyonu yerine özel dönüşüm kullanıyoruz.
     text = text.replace("I", "ı").replace("İ", "i")
     text = text.lower()
 
@@ -166,16 +164,11 @@ DEPREM_CACHE = {
 }
 
 def canlı_depremleri_getir():
-    """
-    Canlı deprem verisini her sayfa açılışında tekrar tekrar çekmek siteyi yavaşlatıyordu.
-    Bu yüzden veriler 5 dakika boyunca cache içinde tutulur.
-    """
     simdi = time.time()
 
     if DEPREM_CACHE["veri"] and simdi - DEPREM_CACHE["zaman"] < 300:
         return DEPREM_CACHE["veri"]
 
-    # Önce AFAD verisi alınır. AFAD çalışmazsa Kandilli yedek kaynak olarak kullanılır.
     afad = afad_depremleri_getir()
 
     if afad:
@@ -190,12 +183,6 @@ def canlı_depremleri_getir():
 
 
 def zemin_bilgisi_getir(zemin_df, sehir, ilce="", mahalle=""):
-    """
-    Zemin verisi CSV dosyasından şehir/ilçe/mahalle bilgisine göre zemin bilgisini getirir.
-    CSV yoksa veya eşleşme bulunamazsa varsayılan orta risk değeri kullanılır.
-    Beklenen CSV kolonları:
-    Sehir, Ilce, Mahalle, Zemin_Tipi, Zemin_Riski, Zemin_Aciklama
-    """
     varsayilan = {
         "tip": "Zemin verisi bulunamadı",
         "risk": 5,
@@ -315,16 +302,7 @@ def geojson_sehir_adi_bul(feature):
     props = feature.get("properties", {})
 
     olasi_alanlar = [
-        "name",
-        "NAME_1",
-        "Name",
-        "il",
-        "Il",
-        "IL",
-        "province",
-        "Province",
-        "sehir",
-        "Sehir"
+        "name", "NAME_1", "Name", "il", "Il", "IL", "province", "Province", "sehir", "Sehir"
     ]
 
     for alan in olasi_alanlar:
@@ -420,6 +398,7 @@ def index():
     deprem_alarm_var = False
     alarm_mesaji = ""
     analiz_yapildi = False
+    son_kayitlar_html = "" # Arayüzde listelenecek son kayıtlar alanı
 
     if os.path.exists(db_yolu):
         try:
@@ -529,10 +508,7 @@ def index():
             secilen_mahalle = gorunum_duzelt(request.form.get("mahalle", ""))
 
             zemin_bilgisi = zemin_bilgisi_getir(
-                zemin_df,
-                secilen_sehir,
-                secilen_ilce,
-                secilen_mahalle
+                zemin_df, secilen_sehir, secilen_ilce, secilen_mahalle
             )
 
             zemin_riski = float(zemin_bilgisi.get("risk", 5))
@@ -548,12 +524,8 @@ def index():
                 model = joblib.load(model_yolu)
 
                 df_test = pd.DataFrame([inputs], columns=[
-                    'Nufus_Yogunlugu',
-                    'Bina_Yas_Ortalamasi',
-                    'Hastane_Yatak_Kapasitesi',
-                    'Toplanma_Alani',
-                    'Itfaiye_Gucu',
-                    'Zemin_Riski'
+                    'Nufus_Yogunlugu', 'Bina_Yas_Ortalamasi', 'Hastane_Yatak_Kapasitesi',
+                    'Toplanma_Alani', 'Itfaiye_Gucu', 'Zemin_Riski'
                 ])
 
                 res = model.predict(df_test)[0]
@@ -565,50 +537,35 @@ def index():
                 }[res]
 
                 risk_skoru = risk_skoru_getir(risk_durumu)
-
                 tahmin_sonucu = risk_durumu
 
                 if secilen_sehir:
                     konum_metni = secilen_sehir
-
                     if secilen_ilce:
                         konum_metni = f"{secilen_sehir} / {secilen_ilce}"
-
                     if secilen_mahalle:
                         konum_metni = f"{konum_metni} / {secilen_mahalle}"
-
                     tahmin_sonucu = f"{konum_metni} için sonuç: {risk_durumu}"
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
 
+                # SQLite Veritabanına Kayıt İşlemi
                 try:
                     conn = sqlite3.connect(db_yolu)
                     cursor = conn.cursor()
 
                     cursor.execute("""
                         INSERT INTO analiz_kayitlari (
-                            sehir,
-                            ilce,
-                            mahalle,
-                            risk_sonucu,
-                            risk_skoru,
-                            zemin_riski,
-                            tarih
+                            sehir, ilce, mahalle, risk_sonucu, risk_skoru, zemin_riski, tarih
                         )
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        secilen_sehir,
-                        secilen_ilce,
-                        secilen_mahalle,
-                        risk_durumu,
-                        risk_skoru,
-                        zemin_riski,
-                        datetime.now().strftime("%d.%m.%Y %H:%M")
+                        secilen_sehir, secilen_ilce, secilen_mahalle, risk_durumu,
+                        risk_skoru, zemin_riski, datetime.now().strftime("%d.%m.%Y %H:%M")
                     ))
 
                     conn.commit()
                     conn.close()
-
                     print("Analiz veritabanına başarıyla kaydedildi.")
 
                 except Exception as db_hata:
@@ -616,70 +573,50 @@ def index():
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_
-
-                    feats = [
-                        'Nüfus',
-                        'Bina Yaşı',
-                        'Yatak',
-                        'Toplanma',
-                        'İtfaiye',
-                        'Zemin'
-                    ]
-
-                    pairs = sorted(
-                        zip(feats, imp),
-                        key=lambda x: x[1],
-                        reverse=True
-                    )
-
-                    aciklama = "<br>".join(
-                        [f"{f}: %{round(i * 100, 1)} etkili" for f, i in pairs]
-                    )
-
+                    feats = ['Nüfus', 'Bina Yaşı', 'Yatak', 'Toplanma', 'İtfaiye', 'Zemin']
+                    pairs = sorted(zip(feats, imp), key=lambda x: x[1], reverse=True)
+                    aciklama = "<br>".join([f"{f}: %{round(i * 100, 1)} etkili" for f, i in pairs])
             else:
                 tahmin_sonucu = "Model dosyası bulunamadı."
-
         except Exception as e:
             tahmin_sonucu = "Veri hatası!"
             print("Model hata:", e)
 
-    m = folium.Map(
-        location=[39, 35],
-        zoom_start=6,
-        tiles="cartodbpositron"
-    )
+    # Arayüz içi veritabanı panel görünümü: Son 5 kayıt tablosunu çekme
+    if os.path.exists(db_yolu):
+        try:
+            conn = sqlite3.connect(db_yolu)
+            cursor = conn.cursor()
+            cursor.execute("SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari ORDER BY id DESC LIMIT 5")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if rows:
+                son_kayitlar_html = '<div class="earthquake-list" style="margin-top:20px;"><h3>📋 Son Analiz Geçmişi (Veritabanı)</h3><table><tr><th>Şehir</th><th>İlçe</th><th>Sonuç</th><th>Tarih</th></tr>'
+                for r in rows:
+                    son_kayitlar_html += f'<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td></tr>'
+                son_kayitlar_html += '</table></div>'
+        except Exception as e:
+            print("Geçmiş kayıt hatası:", e)
 
-    sehirleri_renklendir(
-        m,
-        secilen_sehir,
-        risk_skoru,
-        risk_durumu
-    )
+    m = folium.Map(location=[39, 35], zoom_start=6, tiles="cartodbpositron")
+    sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu)
 
     for d in tum_depremler:
         try:
             lon, lat = d["geojson"]["coordinates"]
             mag = float(d["mag"])
-
             folium.Circle(
-                location=[lat, lon],
-                radius=mag * 5000,
-                color="darkred",
-                fill=True,
-                fill_color="red",
-                fill_opacity=0.4,
-                popup=f"{d.get('title', '?')} - {mag}"
+                location=[lat, lon], radius=mag * 5000, color="darkred", fill=True,
+                fill_color="red", fill_opacity=0.4, popup=f"{d.get('title', '?')} - {mag}"
             ).add_to(m)
-
         except Exception:
             continue
 
     folium.LayerControl().add_to(m)
-
     map_html = m._repr_html_()
 
     sehir_options = ""
-    # GÜNCELLEME: Giriş ekranındaki şehir seçimi form elemanı (landingSehir) oluşturuldu
     landing_sehir_options = '<option value="">Şehir seçiniz</option>'
 
     for sehir in sehirler:
@@ -688,22 +625,17 @@ def index():
         landing_sehir_options += f'<option value="{sehir}">{sehir}</option>'
 
     ilce_options = '<option value="">Önce şehir seçiniz</option>'
-
     if secilen_sehir and secilen_sehir in ilce_verileri:
         ilce_options = '<option value="">İlçe seçiniz</option>'
-
         for ilce in ilce_verileri[secilen_sehir]:
             selected = "selected" if ilce == secilen_ilce else ""
             ilce_options += f'<option value="{ilce}" {selected}>{ilce}</option>'
 
     mahalle_options = '<option value="">Önce ilçe seçiniz</option>'
-
     if secilen_sehir and secilen_ilce:
         mahalle_anahtar = f"{secilen_sehir}|||{secilen_ilce}"
-
         if mahalle_anahtar in mahalle_verileri:
             mahalle_options = '<option value="">Mahalle seçiniz</option>'
-
             for mahalle in mahalle_verileri[mahalle_anahtar]:
                 selected = "selected" if mahalle == secilen_mahalle else ""
                 mahalle_options += f'<option value="{mahalle}" {selected}>{mahalle}</option>'
@@ -746,7 +678,6 @@ def index():
 
         <script>
             if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {{
-
                 const manifest = document.createElement("link");
                 manifest.rel = "manifest";
                 manifest.href = "/static/manifest.json";
@@ -783,20 +714,9 @@ def index():
                 --border:rgba(95, 177, 255, 0.25);
             }}
 
-            #splash-screen {{
-                display:none;
-            }}
-
-            #splash-screen.fade-out {{
-                opacity:0;
-                pointer-events:none;
-            }}
-
-            .splash-image {{
-                width:100%;
-                height:100%;
-                object-fit:cover;
-            }}
+            #splash-screen {{ display:none; }}
+            #splash-screen.fade-out {{ opacity:0; pointer-events:none; }}
+            .splash-image {{ width:100%; height:100%; object-fit:cover; }}
 
             body {{
                 background:
@@ -809,9 +729,7 @@ def index():
                 padding:15px;
             }}
 
-            h1, h2 {{
-                text-align:center;
-            }}
+            h1, h2 {{ text-align:center; }}
 
             .box {{
                 background:var(--card);
@@ -825,8 +743,7 @@ def index():
                 backdrop-filter: blur(10px);
             }}
 
-            input,
-            select {{
+            input, select {{
                 padding:12px;
                 margin:5px;
                 border-radius:10px;
@@ -835,19 +752,8 @@ def index():
                 color:var(--text);
             }}
 
-            label {{
-                display:block;
-                margin-top:10px;
-                font-weight:bold;
-                color:#dceeff;
-            }}
-
-            small {{
-                display:block;
-                color:var(--muted);
-                margin:0 5px 8px 5px;
-                line-height:1.4;
-            }}
+            label {{ display:block; margin-top:10px; font-weight:bold; color:#dceeff; }}
+            small {{ display:block; color:var(--muted); margin:0 5px 8px 5px; line-height:1.4; }}
 
             .zemin-info-box {{
                 margin-top:15px;
@@ -869,10 +775,7 @@ def index():
                 font-weight:bold;
                 box-shadow:0 10px 25px rgba(0, 194, 255, 0.18);
             }}
-
-            button:hover {{
-                filter:brightness(1.08);
-            }}
+            button:hover {{ filter:brightness(1.08); }}
 
             .risk-score-box {{
                 margin-top:15px;
@@ -895,6 +798,18 @@ def index():
                 line-height:1.6;
                 border:1px solid var(--border);
             }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }}
+            th, td {{
+                padding: 10px;
+                text-align: left;
+                border-bottom: 1px solid var(--border);
+            }}
+            th {{ background: rgba(0,0,0,0.2); }}
 
             .example-box {{
                 margin-top:15px;
@@ -932,9 +847,7 @@ def index():
                 border-radius:24px;
                 margin:0 auto 20px auto;
                 max-width:1250px;
-                background:
-                    linear-gradient(180deg, rgba(3,10,22,0.18), rgba(3,10,22,0.78)),
-                    url('/static/riskatlas-bg.png');
+                background: linear-gradient(180deg, rgba(3,10,22,0.18), rgba(3,10,22,0.78)), url('/static/riskatlas-bg.png');
                 background-size:cover;
                 background-position:center;
                 border:1px solid var(--border);
@@ -943,414 +856,70 @@ def index():
                 box-sizing:border-box;
             }}
 
-            .landing-topbar {{
-                display:flex;
-                justify-content:space-between;
-                align-items:flex-start;
-                gap:18px;
-                position:relative;
-                z-index:2;
-            }}
+            .landing-topbar {{ display:flex; justify-content:make_response; justify-content:space-between; align-items:flex-start; gap:18px; position:relative; z-index:2; }}
+            .brand {{ display:flex; align-items:center; gap:12px; }}
+            .brand-icon {{ width:54px; height:54px; border-radius:16px; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg, #ef233c, #9d0208); box-shadow:0 10px 25px rgba(255,59,59,0.28); font-size:28px; }}
+            .brand-title {{ font-size:30px; font-weight:800; letter-spacing:-0.5px; }}
+            .brand-title span {{ color:#ff3b3b; }}
+            .brand-subtitle {{ color:#d7eaff; font-size:14px; margin-top:2px; }}
+            .top-actions {{ display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; }}
 
-            .brand {{
-                display:flex;
-                align-items:center;
-                gap:12px;
-            }}
+            .voice-toggle-btn {{ background:rgba(39,174,96,0.22) !important; border:1px solid rgba(39,174,96,0.55) !important; }}
+            .voice-toggle-btn.off {{ background:rgba(255,255,255,0.10) !important; border:1px solid rgba(255,255,255,0.22) !important; color:#cfd8e3; }}
+            .top-actions button {{ background:rgba(8,24,43,0.72); border:1px solid var(--border); box-shadow:none; padding:10px 14px; }}
 
-            .brand-icon {{
-                width:54px;
-                height:54px;
-                border-radius:16px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:linear-gradient(135deg, #ef233c, #9d0208);
-                box-shadow:0 10px 25px rgba(255,59,59,0.28);
-                font-size:28px;
-            }}
+            .landing-center {{ min-height:62vh; display:flex; align-items:center; justify-content:center; position:relative; z-index:2; }}
+            .landing-panel {{ width:min(560px, 92%); padding:32px; background:rgba(7,17,33,0.86); border:1px solid var(--border); border-radius:24px; backdrop-filter:blur(14px); text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.42); }}
+            .landing-panel h1 {{ text-align:center; font-size:36px; margin:0 0 8px 0; letter-spacing:-0.5px; }}
+            .landing-panel h1 span {{ color:#ff3b3b; }}
+            .landing-panel h2 {{ text-align:center; margin:18px 0 8px 0; font-size:22px; }}
+            .landing-panel p {{ color:#d7eaff; font-size:16px; line-height:1.55; margin:8px 0; }}
+            .location-symbol {{ margin:22px auto 14px auto; width:92px; height:92px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle, rgba(47,137,255,0.20), rgba(0,194,255,0.06)); border:1px solid rgba(95,177,255,0.35); font-size:54px; box-shadow:0 0 45px rgba(47,137,255,0.28); }}
+            .landing-actions {{ display:flex; flex-wrap:wrap; justify-content:center; gap:12px; margin-top:22px; }}
+            .landing-actions button {{ min-width:170px; font-size:16px; }}
+            .secondary-btn {{ background:rgba(255,255,255,0.10); border:1px solid var(--border); }}
+            .status-box {{ margin-top:16px; padding:14px; border-radius:12px; background:rgba(255,255,255,0.08); color:#dff6ff; line-height:1.5; }}
 
-            .brand-title {{
-                font-size:30px;
-                font-weight:800;
-                letter-spacing:-0.5px;
-            }}
+            .side-card {{ position:absolute; z-index:2; width:250px; padding:18px; border-radius:16px; background:rgba(7,17,33,0.72); border:1px solid var(--border); backdrop-filter:blur(10px); line-height:1.5; box-shadow:0 18px 45px rgba(0,0,0,0.28); }}
+            .side-card.left {{ left:28px; bottom:145px; border-color:rgba(255,59,59,0.42); }}
+            .side-card.right {{ right:28px; bottom:145px; border-color:rgba(39,174,96,0.46); }}
+            .side-card ul {{ margin:8px 0 0 0; padding-left:22px; }}
 
-            .brand-title span {{
-                color:#ff3b3b;
-            }}
+            .bottom-features {{ position:absolute; z-index:2; left:28px; right:28px; bottom:28px; display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; padding:14px; background:rgba(7,17,33,0.64); border:1px solid var(--border); border-radius:18px; backdrop-filter:blur(10px); }}
+            .feature-item {{ display:flex; gap:12px; align-items:flex-start; padding:10px; border-right:1px solid rgba(95,177,255,0.16); }}
+            .feature-item:last-child {{ border-right:none; }}
+            .feature-icon {{ width:42px; height:42px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(47,137,255,0.20); font-size:22px; flex-shrink:0; }}
+            .feature-item b {{ display:block; margin-bottom:4px; }}
+            .feature-item span {{ color:#c8dff2; font-size:14px; line-height:1.4; }}
 
-            .brand-subtitle {{
-                color:#d7eaff;
-                font-size:14px;
-                margin-top:2px;
-            }}
+            .main-content {{ display:none; }}
+            .main-content.active {{ display:block; }}
 
-            .top-actions {{
-                display:flex;
-                flex-wrap:wrap;
-                gap:10px;
-                justify-content:flex-end;
-            }}
+            .emergency-alert {{ display:none; position:fixed; z-index:99999; top:0; left:0; width:100%; height:100vh; background:red; color:white; text-align:center; padding:30vh 20px 0 20px; box-sizing:border-box; animation:flash 0.7s infinite; }}
+            .emergency-alert h1 {{ font-size:44px; margin-bottom:15px; }}
+            .emergency-alert p {{ font-size:24px; font-weight:bold; }}
+            .close-alert {{ margin-top:20px; background:white; color:#b00000; font-size:18px; }}
 
-            .voice-toggle-btn {{
-                background:rgba(39,174,96,0.22) !important;
-                border:1px solid rgba(39,174,96,0.55) !important;
-            }}
-
-            .voice-toggle-btn.off {{
-                background:rgba(255,255,255,0.10) !important;
-                border:1px solid rgba(255,255,255,0.22) !important;
-                color:#cfd8e3;
-            }}
-
-            .top-actions button {{
-                background:rgba(8,24,43,0.72);
-                border:1px solid var(--border);
-                box-shadow:none;
-                padding:10px 14px;
-            }}
-
-            .landing-center {{
-                min-height:62vh;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                position:relative;
-                z-index:2;
-            }}
-
-            .landing-panel {{
-                width:min(560px, 92%);
-                padding:32px;
-                background:rgba(7,17,33,0.86);
-                border:1px solid var(--border);
-                border-radius:24px;
-                backdrop-filter:blur(14px);
-                text-align:center;
-                box-shadow:0 20px 60px rgba(0,0,0,0.42);
-            }}
-
-            .landing-panel h1 {{
-                text-align:center;
-                font-size:36px;
-                margin:0 0 8px 0;
-                letter-spacing:-0.5px;
-            }}
-
-            .landing-panel h1 span {{
-                color:#ff3b3b;
-            }}
-
-            .landing-panel h2 {{
-                text-align:center;
-                margin:18px 0 8px 0;
-                font-size:22px;
-            }}
-
-            .landing-panel p {{
-                color:#d7eaff;
-                font-size:16px;
-                line-height:1.55;
-                margin:8px 0;
-            }}
-
-            .location-symbol {{
-                margin:22px auto 14px auto;
-                width:92px;
-                height:92px;
-                border-radius:50%;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:radial-gradient(circle, rgba(47,137,255,0.20), rgba(0,194,255,0.06));
-                border:1px solid rgba(95,177,255,0.35);
-                font-size:54px;
-                box-shadow:0 0 45px rgba(47,137,255,0.28);
-            }}
-
-            .landing-actions {{
-                display:flex;
-                flex-wrap:wrap;
-                justify-content:center;
-                gap:12px;
-                margin-top:22px;
-            }}
-
-            .landing-actions button {{
-                min-width:170px;
-                font-size:16px;
-            }}
-
-            .secondary-btn {{
-                background:rgba(255,255,255,0.10);
-                border:1px solid var(--border);
-            }}
-
-            .status-box {{
-                margin-top:16px;
-                padding:14px;
-                border-radius:12px;
-                background:rgba(255,255,255,0.08);
-                color:#dff6ff;
-                line-height:1.5;
-            }}
-
-            .side-card {{
-                position:absolute;
-                z-index:2;
-                width:250px;
-                padding:18px;
-                border-radius:16px;
-                background:rgba(7,17,33,0.72);
-                border:1px solid var(--border);
-                backdrop-filter:blur(10px);
-                line-height:1.5;
-                box-shadow:0 18px 45px rgba(0,0,0,0.28);
-            }}
-
-            .side-card h3 {{
-                margin:0 0 8px 0;
-            }}
-
-            .side-card p,
-            .side-card li {{
-                color:#d7eaff;
-                font-size:14px;
-            }}
-
-            .side-card.left {{
-                left:28px;
-                bottom:145px;
-                border-color:rgba(255,59,59,0.42);
-            }}
-
-            .side-card.right {{
-                right:28px;
-                bottom:145px;
-                border-color:rgba(39,174,96,0.46);
-            }}
-
-            .side-card ul {{
-                margin:8px 0 0 0;
-                padding-left:22px;
-            }}
-
-            .bottom-features {{
-                position:absolute;
-                z-index:2;
-                left:28px;
-                right:28px;
-                bottom:28px;
-                display:grid;
-                grid-template-columns:repeat(4, 1fr);
-                gap:12px;
-                padding:14px;
-                background:rgba(7,17,33,0.64);
-                border:1px solid var(--border);
-                border-radius:18px;
-                backdrop-filter:blur(10px);
-            }}
-
-            .feature-item {{
-                display:flex;
-                gap:12px;
-                align-items:flex-start;
-                padding:10px;
-                border-right:1px solid rgba(95,177,255,0.16);
-            }}
-
-            .feature-item:last-child {{
-                border-right:none;
-            }}
-
-            .feature-icon {{
-                width:42px;
-                height:42px;
-                border-radius:50%;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:rgba(47,137,255,0.20);
-                font-size:22px;
-                flex-shrink:0;
-            }}
-
-            .feature-item b {{
-                display:block;
-                margin-bottom:4px;
-            }}
-
-            .feature-item span {{
-                color:#c8dff2;
-                font-size:14px;
-                line-height:1.4;
-            }}
-
-            .main-content {{
-                display:none;
-            }}
-
-            .main-content.active {{
-                display:block;
-            }}
-
-            .emergency-alert {{
-                display:none;
-                position:fixed;
-                z-index:99999;
-                top:0;
-                left:0;
-                width:100%;
-                height:100vh;
-                background:red;
-                color:white;
-                text-align:center;
-                padding:30vh 20px 0 20px;
-                box-sizing:border-box;
-                animation:flash 0.7s infinite;
-            }}
-
-            .emergency-alert h1 {{
-                font-size:44px;
-                margin-bottom:15px;
-            }}
-
-            .emergency-alert p {{
-                font-size:24px;
-                font-weight:bold;
-            }}
-
-            .close-alert {{
-                margin-top:20px;
-                background:white;
-                color:#b00000;
-                font-size:18px;
-            }}
-
-            @keyframes flash {{
-                0% {{ background-color:#ff0000; }}
-                50% {{ background-color:#6b0000; }}
-                100% {{ background-color:#ff0000; }}
-            }}
+            @keyframes flash {{ 0% {{ background-color:#ff0000; }} 50% {{ background-color:#6b0000; }} 100% {{ background-color:#ff0000; }} }}
 
             @media (max-width:700px) {{
-                #splash-screen {{
-                    position:fixed;
-                    inset:0;
-                    background:#081120;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    z-index:999999;
-                    transition:opacity .8s ease;
-                }}
-
-                body {{
-                    padding:8px;
-                    background:
-                        linear-gradient(180deg, rgba(3,10,22,0.35), rgba(3,10,22,0.88)),
-                        url('/static/mobile-bg.png');
-                    background-size: cover;
-                    background-position: center top;
-                    background-repeat: no-repeat;
-                    background-attachment: scroll;
-                }}
-
-                .landing-screen {{
-                    background:
-                        linear-gradient(180deg, rgba(3,10,22,0.25), rgba(3,10,22,0.82)),
-                        url('/static/mobile-bg.png');
-                    background-size: cover;
-                    background-position: center top;
-                    background-repeat: no-repeat;
-                    border-radius: 22px;
-                    overflow: hidden;
-                }}
-
-                .box {{
-                    padding:12px;
-                }}
-
-                input,
-                select,
-                button {{
-                    width:100%;
-                    box-sizing:border-box;
-                    margin:6px 0;
-                }}
-
-                h1 {{
-                    font-size:24px;
-                }}
-
-                h2 {{
-                    font-size:18px;
-                }}
-
-                .landing-screen {{
-                    min-height:auto;
-                    padding:14px;
-                }}
-
-                .landing-topbar {{
-                    flex-direction:column;
-                }}
-
-                .top-actions {{
-                    justify-content:flex-start;
-                }}
-
-                .top-actions button {{
-                    width: 100%;
-                    font-size: 16px;
-                    padding: 14px;
-                }}
-
-                .landing-center {{
-                    min-height:auto;
-                    padding:28px 0;
-                }}
-
-                .landing-panel {{
-                    padding:26px 20px;
-                    width:100%;
-                    border-radius:28px;
-                }}
-
-                .landing-panel h1 {{
-                    font-size:42px;
-                    line-height:1.15;
-                }}
-
-                .side-card {{
-                    position:static;
-                    width:auto;
-                    margin:12px 0;
-                }}
-
-                .bottom-features {{
-                    position:static;
-                    grid-template-columns:1fr;
-                    margin-top:12px;
-                }}
-
-                .feature-item {{
-                    border-right:none;
-                    border-bottom:1px solid rgba(95,177,255,0.16);
-                }}
-
-                .feature-item:last-child {{
-                    border-bottom:none;
-                }}
-
-                .emergency-alert h1 {{
-                    font-size:34px;
-                }}
-
-                .emergency-alert p {{
-                    font-size:20px;
-                }}
+                #splash-screen {{ position:fixed; inset:0; background:#081120; display:flex; align-items:center; justify-content:center; z-index:999999; transition:opacity .8s ease; }}
+                body {{ padding:8px; background: linear-gradient(180deg, rgba(3,10,22,0.35), rgba(3,10,22,0.88)), url('/static/mobile-bg.png'); background-size: cover; background-position: center top; }}
+                .landing-screen {{ background: linear-gradient(180deg, rgba(3,10,22,0.25), rgba(3,10,22,0.82)), url('/static/mobile-bg.png'); background-size: cover; border-radius: 22px; overflow: hidden; }}
+                .box {{ padding:12px; }}
+                input, select, button {{ width:100%; box-sizing:border-box; margin:6px 0; }}
+                h1 {{ font-size:24px; }} h2 {{ font-size:18px; }}
+                .landing-screen {{ min-height:auto; padding:14px; }}
+                .landing-topbar {{ flex-direction:column; }}
+                .top-actions {{ justify-content:flex-start; }}
+                .top-actions button {{ width: 100%; font-size: 16px; padding: 14px; }}
+                .landing-center {{ padding:28px 0; min-height:auto; }}
+                .landing-panel {{ padding:26px 20px; width:100%; border-radius:28px; }}
+                .landing-panel h1 {{ font-size:42px; line-height:1.15; }}
+                .side-card {{ position:static; width:auto; margin:12px 0; }}
+                .bottom-features {{ position:static; grid-template-columns:1fr; margin-top:12px; }}
+                .feature-item {{ border-right:none; border-bottom:1px solid rgba(95,177,255,0.16); }}
+                .feature-item:last-child {{ border-bottom:none; }}
             }}
         </style>
     </head>
@@ -1372,6 +941,9 @@ def index():
                 </div>
 
                 <div class="top-actions">
+                    <button type="button" onclick="location.href='/gecmis'" aria-label="Tüm veritabanı analiz geçmişini gör">
+                        📋 Geçmiş Analizler
+                    </button>
                     <button type="button" onclick="girisSesliAciklama('manual')" aria-label="Erişilebilir sesli rehberi başlat">
                         ♿ Erişilebilir Sesli Rehber
                     </button>
@@ -1385,26 +957,17 @@ def index():
             </div>
 
             <div class="landing-center">
-                <div class="landing-panel" role="region" aria-label="RiskAtlas giriş og konum modu">
+                <div class="landing-panel" role="region" aria-label="RiskAtlas giriş ve konum modu">
                     <h1>Risk<span>Atlas</span>'a Hoş Geldiniz</h1>
-                    <p>
-                        Konumunuza göre deprem risklerini analiz eder, size özel uyarılar ve öneriler sunar.
-                    </p>
+                    <p>Konumunuza göre deprem risklerini analiz eder, size özel uyarılar ve öneriler sunar.</p>
 
                     <div class="location-symbol" aria-hidden="true">📍</div>
 
                     <h2>Güvenliğiniz için konumunuzu kullanıyoruz.</h2>
-                    <p>
-                        4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkilenebiliyorsa sizi uyarır,
-                        uzak depremler için gereksiz alarm vermez.
-                    </p>
+                    <p>4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkilenebiliyorsa sizi uyarır, uzak depremler için gereksiz alarm vermez.</p>
 
                     <div class="landing-actions">
-                        <button
-                            type="button"
-                            onclick="konumModunuBaslat()"
-                            aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat"
-                        >
+                        <button type="button" onclick="konumModunuBaslat()" aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat">
                             📍 Konumumu Kullan
                         </button>
                         
@@ -1414,37 +977,22 @@ def index():
                             </select>
                         </div>
 
-                        <button
-                            type="button"
-                            class="secondary-btn"
-                            onclick="sehirSecerekDevamEt()"
-                            aria-label="Giriş ekranında seçtiğiniz şehirle birlikte analiz ekranına geç"
-                        >
+                        <button type="button" class="secondary-btn" onclick="sehirSecerekDevamEt()" aria-label="Giriş ekranında seçtiğiniz şehirle birlikte analiz ekranına geç">
                             Şehir Seçerek Devam Et
                         </button>
 
-                        <button
-                            type="button"
-                            class="secondary-btn"
-                            onclick="girisSesliAciklama('manual')"
-                            aria-label="Giriş ekranındaki erişilebilir sesli rehberi başlat"
-                        >
+                        <button type="button" class="secondary-btn" onclick="girisSesliAciklama('manual')" aria-label="Giriş ekranındaki erişilebilir sesli rehberi başlat">
                             ♿ Sesli Rehberi Başlat
                         </button>
                     </div>
 
-                    <div class="status-box" id="konumDurumu" aria-live="polite">
-                        Konum modu henüz başlatılmadı.
-                    </div>
+                    <div class="status-box" id="konumDurumu" aria-live="polite">Konum modu henüz başlatılmadı.</div>
                 </div>
             </div>
 
             <div class="side-card left">
                 <h3>🚨 Neden Konum İzni?</h3>
-                <p>
-                    Size en doğru deprem uyarılarını sunabilmek için bulunduğunuz konuma ihtiyaç duyarız.
-                    Sadece yakınınızdaki risklerde sizi uyarırız.
-                </p>
+                <p>Size en doğru deprem uyarılarını sunabilmek için bulunduğunuz konuma ihtiyaç duyarız. Sadece yakınınızdaki risklerde sizi uyarırız.</p>
             </div>
 
             <div class="side-card right">
@@ -1456,89 +1004,29 @@ def index():
                     <li>Titreşimli uyarılar</li>
                 </ul>
             </div>
-
-            <div class="bottom-features">
-                <div class="feature-item">
-                    <div class="feature-icon">🎯</div>
-                    <div>
-                        <b>Konuma Dayalı Uyarı</b>
-                        <span>Sadece size yakın depremlerde uyarı alın.</span>
-                    </div>
-                </div>
-
-                <div class="feature-item">
-                    <div class="feature-icon">🔔</div>
-                    <div>
-                        <b>Gerçek Zamanlı Bildirim</b>
-                        <span>4.5+ depremlerde sesli, görsel ve titreşimli uyarı.</span>
-                    </div>
-                </div>
-
-                <div class="feature-item">
-                    <div class="feature-icon">🛡️</div>
-                    <div>
-                        <b>Güvenilir Kaynaklar</b>
-                        <span>AFAD ve Kandilli verileri kullanılır.</span>
-                    </div>
-                </div>
-
-                <div class="feature-item">
-                    <div class="feature-icon">👥</div>
-                    <div>
-                        <b>Herkes İçin Erişilebilir</b>
-                        <span>Engelli bireyler düşünülerek tasarlandı.</span>
-                    </div>
-                </div>
-            </div>
         </section>
 
         <main id="mainContent" class="main-content">
-        <div
-            id="emergencyAlert"
-            class="emergency-alert"
-            role="alertdialog"
-            aria-live="assertive"
-        >
+        <div id="emergencyAlert" class="emergency-alert" role="alertdialog" aria-live="assertive">
             <h1>🚨 ACİL DURUM</h1>
-
             <p>{alarm_mesaji if alarm_mesaji else "Canlı deprem verisi kritik seviyeye ulaştı."}</p>
-
-            <p>
-                Güvenli alana geçin.
-                Asansör kullanmayın.
-                Toplanma alanına yönelin.
-            </p>
-
-            <button
-                class="close-alert"
-                onclick="acilDurumKapat()"
-            >
-                Uyarıyı Kapat
-            </button>
+            <p>Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin.</p>
+            <button class="close-alert" onclick="acilDurumKapat()">Uyarıyı Kapat</button>
         </div>
 
         <h1>RiskAtlas: AI Destekli Afet Risk Analiz Platformu</h1>
-
-        <h2>
-            🔴 4.0+ Canlı Deprem Uyarıları:
-            {deprem_ozeti}
-        </h2>
+        <h2>🔴 4.0+ Canlı Deprem Uyarıları: {deprem_ozeti}</h2>
 
         <div class="box">
             {map_html}
-
             <div class="earthquake-list" aria-label="Canlı deprem listesi">
                 <h3>📋 Tüm Güncel Deprem Listesi</h3>
-                <ul>
-                    {deprem_listesi_html}
-                </ul>
+                <ul>{deprem_listesi_html}</ul>
             </div>
         </div>
 
         <div class="box">
-
             <form method="POST">
-
                 <label for="sehir">Şehir Seçiniz</label>
                 <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
                     <option value="">Şehir seçiniz</option>
@@ -1556,321 +1044,102 @@ def index():
                 </select>
 
                 <label for="n">Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu</label>
-                <input
-                    id="n"
-                    type="number"
-                    step="any"
-                    name="n"
-                    placeholder="Örn: 5000 kişi/km²"
-                    required
-                >
-                <small>
-                    Bu değer binada yaşayan kişi sayısını değil, bulunduğunuz mahalle veya ilçedeki genel nüfus yoğunluğunu temsil eder.
-                </small>
+                <input id="n" type="number" step="any" name="n" placeholder="Örn: 5000 kişi/km²" required>
+                <small>Bu değer binada yaşayan kişi sayısını değil, bulunduğunuz mahalle veya ilçedeki genel nüfus yoğunluğunu temsil eder.</small>
 
                 <label for="b">Bina Yaşı</label>
-                <input
-                    id="b"
-                    type="number"
-                    step="any"
-                    name="b"
-                    placeholder="Örn: 20"
-                    required
-                >
+                <input id="b" type="number" step="any" name="b" placeholder="Örn: 20" required>
 
                 <label for="y">Yatak Kapasitesi</label>
-                <input
-                    id="y"
-                    type="number"
-                    step="any"
-                    name="y"
-                    placeholder="Örn: 1000"
-                    required
-                >
+                <input id="y" type="number" step="any" name="y" placeholder="Örn: 1000" required>
 
                 <label for="t">Toplanma Alanı</label>
-                <input
-                    id="t"
-                    type="number"
-                    step="any"
-                    name="t"
-                    placeholder="Örn: 50000"
-                    required
-                >
+                <input id="t" type="number" step="any" name="t" placeholder="Örn: 50000" required>
 
                 <label for="i">İtfaiye Gücü</label>
-                <input
-                    id="i"
-                    type="number"
-                    step="any"
-                    name="i"
-                    placeholder="Örn: 50"
-                    required
-                >
+                <input id="i" type="number" step="any" name="i" placeholder="Örn: 50" required>
 
                 <div class="zemin-info-box">
                     <b>🌍 Zemin Riski:</b><br>
                     Zemin riski kullanıcıdan istenmez. Seçilen şehir, ilçe ve mahalle bilgisine göre sistem tarafından otomatik değerlendirilir.
                 </div>
-
                 <br><br>
-
-                <button type="submit">
-                    Analiz Et
-                </button>
-
+                <button type="submit">Analiz Et</button>
             </form>
 
-            <div class="example-box">
-                <b>📌 Örnek Değer Rehberi:</b><br><br>
-                • <b>Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu:</b> 5000 kişi/km² → bulunduğunuz mahalle veya ilçedeki genel yoğunluğu temsil eder.<br>
-                • <b>Bina Yaşı:</b> 20 → bölgedeki ortalama bina yaşı gibi düşünülmelidir.<br>
-                • <b>Yatak Kapasitesi:</b> 1000 → hastane/acil durum kapasitesini temsil eder.<br>
-                • <b>Toplanma Alanı:</b> 50000 → m² cinsinden düşünülebilir; yüksek değer daha avantajlıdır.<br>
-                • <b>İtfaiye Gücü:</b> 50 → ekip, araç veya müdahale kapasitesi gibi düşünülebilir.<br>
-                • <b>Zemin Riski:</b> kullanıcı tarafından girilmez; seçilen bölgeye göre sistem tarafından otomatik kullanılır.
-            </div>
-
             <section id="analizSonucAlani">
-                <h2
-                    style="color:{risk_rengi};"
-                    aria-live="assertive"
-                    role="alert"
-                >
-                    {tahmin_sonucu}
-                </h2>
-
-                {f'''
-                <div class="risk-score-box">
-                    Risk Skoru: {risk_skoru}/5
-                </div>
-                ''' if risk_skoru > 0 else ""}
-
+                <h2 style="color:{risk_rengi};" aria-live="assertive" role="alert">{tahmin_sonucu}</h2>
+                {f'''<div class="risk-score-box">Risk Skoru: {risk_skoru}/5</div>''' if risk_skoru > 0 else ""}
                 {zemin_bilgisi_html}
-
                 <p>{aciklama}</p>
             </section>
 
-            <button
-                type="button"
-                onclick="acilDurumGoster()"
-            >
-                🚨 Erişilebilir Acil Durum Alarmını Test Et
-            </button>
+            {son_kayitlar_html}
 
-            {f'''
-            <div class="suggestion-box">
-                <h3>🧭 Acil Durum Öneri Sistemi</h3>
-                <ul>{oneriler_html}</ul>
-            </div>
-            ''' if oneriler else ""}
+            <br>
+            <button type="button" onclick="acilDurumGoster()">🚨 Erişilebilir Acil Durum Alarmını Test Et</button>
 
-            <div class="accessibility-note">
-                <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
-                ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm<br>
-                ✅ Mobil cihazlarda titreşim desteği<br>
-                ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde çalışan og ayarlardan kapatılabilen Türkçe sesli yönlendirme<br>
-                ✅ Harita altında ekran okuyucu uyumlu deprem listesi<br>
-                ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
-                ✅ Büyük yazı og yüksek kontrastlı acil durum ekranı
-            </div>
+            {f'''<div class="suggestion-box"><h3>🧭 Acil Durum Öneri Sistemi</h3><ul>{oneriler_html}</ul></div>''' if oneriler else ""}
         </div>
         </main>
 
         <script>
-            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
-                navigator.serviceWorker.register("/static/service-worker.js")
-                .then(() => console.log("Service Worker kayıt edildi."))
-                .catch(error => console.log("Service Worker hatası:", error));
-            }}
-
-            if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
-                navigator.serviceWorker.getRegistrations().then(function(registrations) {{
-                    for (let registration of registrations) {{
-                        registration.unregister();
-                    }}
-                }});
-            }}
-
             const analizYapildi = "{analiz_yapildi}" === "True";
             const depremVerileri = {deprem_verileri_json};
             const ilceVerileri = {ilce_verileri_json};
             const mahalleVerileri = {mahalle_verileri_json};
-
             let girisRehberiEtkilesimleBasladi = false;
 
-            function sesliYonlendirmeAcikMi() {{
-                return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali";
-            }}
+            function sesliYonlendirmeAcikMi() {{ return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali"; }}
 
             function sesliYonlendirmeButonunuGuncelle() {{
                 const btn = document.getElementById("voiceToggleButton");
-
-                if (!btn) {{
-                    return;
-                }}
-
+                if (!btn) return;
                 if (sesliYonlendirmeAcikMi()) {{
                     btn.textContent = "🔊 Sesli Yönlendirme: Açık";
-                    btn.classList.remove("off");
-                    btn.setAttribute("aria-label", "Sesli yönlendirme açık. Kapatmak için dokunun.");
                 }} else {{
                     btn.textContent = "🔇 Sesli Yönlendirme: Kapalı";
-                    btn.classList.add("off");
-                    btn.setAttribute("aria-label", "Sesli yönlendirme kapalı. Açmak için dokunun.");
-                }}
-            }}
-
-            function sesliYonlendirmeAyariniDegistir() {{
-                if (sesliYonlendirmeAcikMi()) {{
-                    localStorage.setItem("riskatlasSesliYonlendirme", "kapali");
-
-                    if ("speechSynthesis" in window) {{
-                        window.speechSynthesis.cancel();
-                    }}
-                }} else {{
-                    localStorage.setItem("riskatlasSesliYonlendirme", "acik");
-                    setTimeout(() => {{
-                        girisSesliAciklama('manual');
-                    }}, 300);
-                }}
-
-                sesliYonlendirmeButonunuGuncelle();
-            }}
-
-            function sesliBilgi(metin) {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(metin);
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.9;
-                    mesaj.pitch = 1;
-                    window.speechSynthesis.cancel();
-                    setTimeout(() => {{
-                        window.speechSynthesis.speak(mesaj);
-                    }}, 200);
                 }}
             }}
 
             function otomatikSesliAsistanBaslat() {{
-                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
-                    console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
-                    return;
-                }}
-
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 const recognition = new SpeechRecognition();
                 recognition.continuous = true;
-                recognition.interimResults = false;
                 recognition.lang = 'tr-TR';
 
                 recognition.onresult = function(event) {{
                     for (let i = event.resultIndex; i < event.results.length; ++i) {{
                         if (event.results[i].isFinal) {{
                             const komut = event.results[i][0].transcript.trim().toLowerCase();
-                            console.log("Algılanan Komut:", komut);
-
-                            if (komut.includes("analiz ekranı")) {{
-                                detayliAnalizeGec();
-                            }} else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat")) {{
-                                acilDurumKapat();
-                            }}
+                            if (komut.includes("analiz ekranı")) {{ detayliAnalizeGec(); }}
+                            else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat")) {{ acilDurumKapat(); }}
                         }}
                     }}
                 }};
-
-                recognition.onerror = function(event) {{
-                    console.error("Ses tanıma hatası:", event.error);
-                }};
-
-                recognition.onend = function() {{
-                    if (sesliYonlendirmeAcikMi()) {{
-                        try {{ recognition.start(); }} catch(e) {{}}
-                    }}
-                }};
-
-                try {{
-                    recognition.start();
-                    console.log("Akıllı sesli asistan sürekli dinleme modunda aktif.");
-                }} catch(e) {{
-                    console.error("Ses tanıma başlatılamadı:", e);
-                }}
+                recognition.onend = function() {{ if (sesliYonlendirmeAcikMi()) try {{ recognition.start(); }} catch(e) {{}} }};
+                try {{ recognition.start(); }} catch(e) {{}}
             }}
 
             function girisSesliAciklama(kaynak) {{
-
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if (kaynak === 'manual' || kaynak === 'firstInteraction') {{
-                    girisRehberiEtkilesimleBasladi = true;
-                }}
-
-                const metin =
-                    "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
-                    "Sesli yönlendirme varsayılan olarak açıktır. İsterseniz ayarlar kısmındaki sesli yönlendirme düğmesinden bu özelliği kapatabilirsiniz. " +
-                    "Bu rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
-                    "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
-                    "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
-                    "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
-                    "Açıklama şimdi ikinci kez tekrar edilecektir.";
-
+                if (!sesliYonlendirmeAcikMi()) return;
+                const metin = "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz.";
                 if ("speechSynthesis" in window) {{
-
                     window.speechSynthesis.cancel();
-
-                    const mesaj1 = new SpeechSynthesisUtterance(metin);
-                    mesaj1.lang = "tr-TR";
-                    mesaj1.rate = 0.9;
-                    mesaj1.pitch = 1;
-
-                    const mesaj2 = new SpeechSynthesisUtterance(metin);
-                    mesaj2.lang = "tr-TR";
-                    mesaj2.rate = 0.9;
-                    mesaj2.pitch = 1;
-
-                    mesaj1.onend = function () {{
-                        setTimeout(() => {{
-                            if (sesliYonlendirmeAcikMi()) {{
-                                window.speechSynthesis.speak(mesaj2);
-                            }} else {{
-                                otomatikSesliAsistanBaslat();
-                            }}
-                        }}, 700);
-                    }};
-
-                    mesaj2.onend = function () {{
-                        otomatikSesliAsistanBaslat();
-                    }};
-
-                    window.speechSynthesis.speak(mesaj1);
+                    const msg = new SpeechSynthesisUtterance(metin);
+                    msg.lang = "tr-TR";
+                    msg.onend = function() {{ otomatikSesliAsistanBaslat(); }};
+                    window.speechSynthesis.speak(msg);
                 }}
             }}
 
-            function ilkEtkilesimdeSesliRehberiBaslat() {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if (girisRehberiEtkilesimleBasladi) {{
-                    return;
-                }}
-
-                girisSesliAciklama('firstInteraction');
-            }}
-
-            // GÜNCELLEME: Giriş ekranından şehir seçilince tetiklenecek fonksiyon
             function sehirSecerekDevamEt() {{
                 const landingSelect = document.getElementById("landingSehir");
                 const mainSelect = document.getElementById("sehir");
-                
                 if (landingSelect && mainSelect && landingSelect.value) {{
                     mainSelect.value = landingSelect.value;
-                    ilceleriGuncelle(); // Ana formun ilçelerini otomatik tetikler
+                    ilceleriGuncelle();
                 }}
                 detayliAnalizeGec();
             }}
@@ -1878,166 +1147,18 @@ def index():
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
                 document.getElementById("mainContent").classList.add("active");
-                sesliBilgi("Detaylı analiz ekranına geçildi.");
-            }}
-
-            function mesafeKm(lat1, lon1, lat2, lon2) {{
-                const R = 6371;
-                const dLat = (lat2 - lat1) * Math.PI / 180;
-                const dLon = (lon2 - lon1) * Math.PI / 180;
-                const a =
-                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                    Math.cos(lat1 * Math.PI / 180) *
-                    Math.cos(lat2 * Math.PI / 180) *
-                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                return R * c;
-            }}
-
-            function yakinDepremKontrolEt(kullaniciLat, kullaniciLon) {{
-                let yakinKritik = null;
-
-                depremVerileri.forEach(function(d) {{
-                    try {{
-                        const mag = parseFloat(d.mag || 0);
-                        const coords = d.geojson && d.geojson.coordinates ? d.geojson.coordinates : null;
-
-                        if (!coords || mag < 4.5) {{
-                            return;
-                        }}
-
-                        const depremLon = parseFloat(coords[0]);
-                        const depremLat = parseFloat(coords[1]);
-                        const uzaklik = mesafeKm(kullaniciLat, kullaniciLon, depremLat, depremLon);
-
-                        if (
-                            (mag >= 4.5 && uzaklik <= 100) ||
-                            (mag >= 5.5 && uzaklik <= 250)
-                        ) {{
-                            if (!yakinKritik || uzaklik < yakinKritik.uzaklik) {{
-                                yakinKritik = {{
-                                    title: d.title || "Bilinmeyen Konum",
-                                    mag: mag,
-                                    uzaklik: Math.round(uzaklik)
-                                }};
-                            }}
-                        }}
-                    }} catch (e) {{
-                        console.log("Yakın deprem kontrol hatası:", e);
-                    }}
-                }});
-
-                if (yakinKritik) {{
-                    document.getElementById("konumDurumu").innerHTML =
-                        "Yakınınızda kritik deprem algılandı: " +
-                        yakinKritik.title +
-                        " - Büyüklük: " +
-                        yakinKritik.mag +
-                        " - Yaklaşık uzaklık: " +
-                        yakinKritik.uzaklik +
-                        " km.";
-
-                    sesliBilgi(
-                        "Dikkat. Yakınınızda kritik seviyede deprem algılandı. Güvenli alana geçin. Asansör kullanmayın."
-                    );
-
-                    acilDurumGoster();
-                }} else {{
-                    document.getElementById("konumDurumu").innerHTML =
-                        "Konum alındı. Yakınınızda kritik seviyede deprem uyarısı bulunmuyor.";
-
-                    sesliBilgi("Konum alındı. Yakınınızda kritik seviyede deprem uyarısı bulunmuyor.");
-                }}
-            }}
-
-            function konumModunuBaslat() {{
-                sesliBilgi(
-                    "Şimdi konum izni istenecek. Açılan pencerede izin ver seçeneğini seçerseniz yakın deprem uyarıları başlatılacaktır."
-                );
-
-                const durum = document.getElementById("konumDurumu");
-
-                if (!navigator.geolocation) {{
-                    durum.innerHTML = "Bu cihazda konum özelliği desteklenmiyor.";
-                    sesliBilgi("Bu cihazda konum özelliği desteklenmiyor.");
-                    return;
-                }}
-
-                durum.innerHTML = "Konum izni bekleniyor...";
-
-                navigator.geolocation.getCurrentPosition(
-                    function(position) {{
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-
-                        durum.innerHTML = "Konum alındı. Yakın deprem verileri kontrol ediliyor.";
-                        yakinDepremKontrolEt(lat, lon);
-                    }},
-                    function(error) {{
-                        durum.innerHTML =
-                            "Konum izni alınamadı. İsterseniz şehir seçerek detaylı analiz ekranına geçebilirsiniz.";
-
-                        sesliBilgi(
-                            "Konum izni alınamadı. İsterseniz şehir seçerek detaylı analiz ekranına geçebilirsiniz."
-                        );
-                    }},
-                    {{
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 60000
-                    }}
-                );
             }}
 
             function ilceleriGuncelle() {{
                 const sehirSelect = document.getElementById("sehir");
                 const ilceSelect = document.getElementById("ilce");
-                const mahalleSelect = document.getElementById("mahalle");
-
-                if (!sehirSelect || !ilceSelect) {{
-                    return;
-                }}
-
+                if (!sehirSelect || !ilceSelect) return;
                 const secilenSehir = sehirSelect.value;
                 const ilceler = (ilceVerileri[secilenSehir] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
-
-                ilceSelect.innerHTML = "";
-
-                if (mahalleSelect) {{
-                    mahalleSelect.innerHTML = "";
-                    const mahalleOption = document.createElement("option");
-                    mahalleOption.value = "";
-                    mahalleOption.textContent = "Önce ilçe seçiniz";
-                    mahalleSelect.appendChild(mahalleOption);
-                }}
-
-                if (!secilenSehir) {{
-                    const option = document.createElement("option");
-                    option.value = "";
-                    option.textContent = "Önce şehir seçiniz";
-                    ilceSelect.appendChild(option);
-                    return;
-                }}
-
-                if (ilceler.length === 0) {{
-                    const option = document.createElement("option");
-                    option.value = "";
-                    option.textContent = "İlçe verisi bulunamadı";
-                    ilceSelect.appendChild(option);
-                    return;
-                }}
-
-                const ilkOption = document.createElement("option");
-                ilkOption.value = "";
-                ilkOption.textContent = "İlçe seçiniz";
-                ilceSelect.appendChild(ilkOption);
-
-                ilceler.forEach(function(ilce) {{
-                    const option = document.createElement("option");
-                    option.value = ilce;
-                    option.textContent = ilce;
-                    ilceSelect.appendChild(option);
+                ilceSelect.innerHTML = "<option value=''>İlçe seçiniz</option>";
+                ilceler.forEach(ilce => {{
+                    const op = document.createElement("option");
+                    op.value = ilce; op.textContent = ilce; ilceSelect.appendChild(op);
                 }});
             }}
 
@@ -2045,170 +1166,38 @@ def index():
                 const sehirSelect = document.getElementById("sehir");
                 const ilceSelect = document.getElementById("ilce");
                 const mahalleSelect = document.getElementById("mahalle");
-
-                if (!sehirSelect || !ilceSelect || !mahalleSelect) {{
-                    return;
-                }}
-
-                const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
-                const mahalleler = (mahalleVerileri[anahtar] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
-
-                mahalleSelect.innerHTML = "";
-
-                if (mahalleler.length === 0) {{
-                    const option = document.createElement("option");
-                    option.value = "";
-                    option.textContent = "Mahalle verisi bulunamadı";
-                    mahalleSelect.appendChild(option);
-                    return;
-                }}
-
-                const ilkOption = document.createElement("option");
-                ilkOption.value = "";
-                ilkOption.textContent = "Mahalle seçiniz";
-                mahalleSelect.appendChild(ilkOption);
-
-                mahalleler.forEach(function(mahalle) {{
-                    const option = document.createElement("option");
-                    option.value = mahalle;
-                    option.textContent = mahalle;
-                    mahalleSelect.appendChild(option);
+                if (!sehirSelect || !ilceSelect || !mahalleSelect) return;
+                const key = sehirSelect.value + "|||" + ilceSelect.value;
+                const mahalleler = (mahalleVerileri[key] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
+                mahalleSelect.innerHTML = "<option value=''>Mahalle seçiniz</option>";
+                mahalleler.forEach(m => {{
+                    const op = document.createElement("option");
+                    op.value = m; op.textContent = m; mahalleSelect.appendChild(op);
                 }});
             }}
 
-            function sesliUyariVer() {{
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(
-                        "Dikkat. Canlı deprem verisinde kritik seviyede deprem tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
-                    );
-
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.9;
-                    mesaj.pitch = 1;
-
-                    window.speechSynthesis.cancel();
-
-                    setTimeout(() => {{
-                        window.speechSynthesis.speak(mesaj);
-                    }}, 200);
-                }}
-            }}
-
-            function acilDurumGoster() {{
-                const alertBox = document.getElementById("emergencyAlert");
-                alertBox.style.display = "block";
-
-                if (navigator.vibrate) {{
-                    navigator.vibrate([500, 300, 500, 300, 1000]);
-                }}
-
-                sesliUyariVer();
-            }}
-
-            function acilDurumKapat() {{
-                document.getElementById("emergencyAlert").style.display = "none";
-
-                if (navigator.vibrate) {{
-                    navigator.vibrate(0);
-                }}
-
-                if ("speechSynthesis" in window) {{
-                    window.speechSynthesis.cancel();
-                }}
-            }}
-
             window.onload = function () {{
-
-                if (window.innerWidth <= 700) {{
-                    setTimeout(function () {{
-                        const splash = document.getElementById("splash-screen");
-                        if (splash) {{
-                            splash.classList.add("fade-out");
-                            setTimeout(function () {{
-                                splash.remove();
-                            }}, 800);
-                        }}
-                    }}, 1800);
-                }} else {{
-                    const splash = document.getElementById("splash-screen");
-                    if (splash) {{
-                        splash.remove();
-                    }}
-                }}
-
                 sesliYonlendirmeButonunuGuncelle();
-
-                setTimeout(() => {{
-                    if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
-                        girisSesliAciklama('auto');
-                    }}
-                }}, 900);
-
-                document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-                document.addEventListener('touchstart', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-                document.addEventListener('keydown', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-
-                const depremAlarmVar = "{deprem_alarm_var}" === "True";
-
-                if (depremAlarmVar) {{
-                    console.log("Genel canlı deprem alarmı mevcut. Konum modu açılırsa yakınlık kontrolü yapılır.");
-                }}
-
                 if (analizYapildi) {{
-                    document.getElementById("landingScreen").style.display = "none";
-                    document.getElementById("mainContent").classList.add("active");
-
-                    setTimeout(() => {{
-                        const sonucAlani = document.getElementById("analizSonucAlani");
-
-                        if (sonucAlani) {{
-                            sonucAlani.scrollIntoView({{
-                                behavior: "smooth",
-                                block: "start"
-                            }});
-
-                            const sonucMetni = sonucAlani.innerText.trim();
-                            if (sonucMetni && sesliYonlendirmeAcikMi()) {{
-                                sesliBilgi("Analiz sonucu hazır. " + sonucMetni);
-                            }}
-                        }}
-                    }}, 450);
+                    detayliAnalizeGec();
+                    const area = document.getElementById("analizSonucAlani");
+                    if (area) area.scrollIntoView({{ behavior: "smooth" }});
                 }}
             }};
         </script>
-
     </body>
     </html>
     """
-
     return make_response(html)
 
 
 @app.route("/gecmis")
 def gecmis():
-    """SQLite veritabanına kaydedilen analiz geçmişini gösterir."""
     try:
         conn = sqlite3.connect(db_yolu)
-        df = pd.read_sql_query("""
-            SELECT
-                id,
-                sehir,
-                ilce,
-                mahalle,
-                risk_sonucu,
-                risk_skoru,
-                zemin_riski,
-                tarih
-            FROM analiz_kayitlari
-            ORDER BY id DESC
-        """, conn)
+        df = pd.read_sql_query("SELECT id, sehir, ilce, mahalle, risk_sonucu, risk_skoru, zemin_riski, tarih FROM analiz_kayitlari ORDER BY id DESC", conn)
         conn.close()
-
-        if df.empty:
-            tablo_html = "<p>Henüz kayıtlı analiz sonucu bulunmuyor.</p>"
-        else:
-            tablo_html = df.to_html(index=False, classes="history-table", border=0)
-
+        tablo_html = "<p>Henüz kayıtlı analiz sonucu bulunmuyor.</p>" if df.empty else df.to_html(index=False, classes="history-table", border=0)
     except Exception as e:
         tablo_html = f"<p>Veritabanı okunurken hata oluştu: {e}</p>"
 
@@ -2217,57 +1206,26 @@ def gecmis():
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>RiskAtlas Analiz Geçmişi</title>
         <style>
-            body {{
-                background:#06111f;
-                color:#eaf4ff;
-                font-family:Arial, sans-serif;
-                padding:20px;
-            }}
-            .box {{
-                max-width:1200px;
-                margin:auto;
-                background:rgba(12,29,52,0.92);
-                border:1px solid rgba(95,177,255,0.25);
-                border-radius:18px;
-                padding:22px;
-                overflow-x:auto;
-            }}
-            a {{
-                color:#00c2ff;
-                text-decoration:none;
-                font-weight:bold;
-            }}
-            table {{
-                width:100%;
-                border-collapse:collapse;
-                margin-top:18px;
-            }}
-            th, td {{
-                border:1px solid rgba(95,177,255,0.25);
-                padding:10px;
-                text-align:left;
-            }}
-            th {{
-                background:#0b1e35;
-            }}
-            tr:nth-child(even) {{
-                background:rgba(255,255,255,0.04);
-            }}
+            body {{ background:#06111f; color:#eaf4ff; font-family:Arial, sans-serif; padding:20px; }}
+            .box {{ max-width:1200px; margin:auto; background:rgba(12,29,52,0.92); border:1px solid rgba(95,177,255,0.25); border-radius:18px; padding:22px; }}
+            a {{ color:#00c2ff; text-decoration:none; font-weight:bold; }}
+            table {{ width:100%; border-collapse:collapse; margin-top:18px; }}
+            th, td {{ border:1px solid rgba(95,177,255,0.25); padding:10px; text-align:left; }}
+            th {{ background:#0b1e35; }}
+            tr:nth-child(even) {{ background:rgba(255,255,255,0.04); }}
         </style>
     </head>
     <body>
         <div class="box">
-            <h1>📋 RiskAtlas Analiz Geçmişi</h1>
+            <h1>📋 RiskAtlas Analiz Geçmişi (Tüm Kayıtlar)</h1>
             <p><a href="/">← Ana sayfaya dön</a></p>
             {tablo_html}
         </div>
     </body>
     </html>
     """
-
     return make_response(html)
 
 

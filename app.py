@@ -421,8 +421,6 @@ def index():
     alarm_mesaji = ""
     analiz_yapildi = False
 
-    # Şehir listesi eski afet verisi tablosundan alınabilir.
-    # Ancak Render ortamında bu tablo yoksa hata vermeden CSV yedeğine geçilir.
     if os.path.exists(db_yolu):
         try:
             conn = sqlite3.connect(db_yolu)
@@ -445,7 +443,6 @@ def index():
         except Exception as e:
             print("Veritabanı okuma hatası:", e)
 
-    # afet_verileri tablosu yoksa veya şehir listesi boşsa CSV yedek olarak kullanılır.
     if not sehirler and os.path.exists(data_yolu):
         try:
             df = pd.read_csv(data_yolu, encoding="utf-8-sig")
@@ -456,7 +453,6 @@ def index():
         except Exception as e:
             print("CSV veri okuma hatası:", e)
 
-    # İlçe CSV dosyası sonra eklenecek. Dosya yoksa sistem bozulmadan çalışır.
     if os.path.exists(ilce_yolu):
         try:
             ilce_df = pd.read_csv(ilce_yolu, encoding="utf-8-sig")
@@ -469,7 +465,6 @@ def index():
         except Exception as e:
             print("İlçe CSV okuma hatası:", e)
 
-    # Zemin CSV dosyası sonra eklenecek. Dosya yoksa sistem varsayılan zemin riskiyle çalışır.
     if os.path.exists(zemin_yolu):
         try:
             zemin_df = pd.read_csv(zemin_yolu, encoding="utf-8-sig")
@@ -483,7 +478,6 @@ def index():
 
             if all(kolon in zemin_df.columns for kolon in ["Sehir", "Ilce", "Mahalle"]):
                 for (sehir, ilce), grup in zemin_df.groupby(["Sehir", "Ilce"]):
-                    anahtar = f"{sehir}|||{ilce}"
                     sehir_temiz = gorunum_duzelt(sehir)
                     ilce_temiz = gorunum_duzelt(ilce)
                     anahtar = f"{sehir_temiz}|||{ilce_temiz}"
@@ -492,8 +486,6 @@ def index():
         except Exception as e:
             print("Zemin CSV okuma hatası:", e)
 
-    # Şehir listesi yalnızca model/veritabanı verisinden gelirse 81 ilin tamamı görünmeyebilir.
-    # Bu nedenle ilçe ve zemin CSV dosyalarındaki şehirler de listeye eklenir.
     tum_sehirler = set(sehirler)
     tum_sehirler.update(ilce_verileri.keys())
 
@@ -504,13 +496,11 @@ def index():
 
     tum_depremler = canlı_depremleri_getir()
 
-    # Üst canlı deprem alanında sadece 4.0 ve üzeri depremler gösterilir.
     ust_depremler = [
         d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4
     ]
 
-    # Alarm, analiz sonucuna göre değil; canlı deprem verisinde kritik eşik aşılırsa çalışır.
     kritik_depremler = [
         d for d in tum_depremler
         if float(d.get("mag", 0)) >= 4.5
@@ -591,7 +581,6 @@ def index():
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
 
-                # Analiz sonucu SQLite veritabanına kaydedilir
                 try:
                     conn = sqlite3.connect(db_yolu)
                     cursor = conn.cursor()
@@ -620,7 +609,7 @@ def index():
                     conn.commit()
                     conn.close()
 
-                    print("Analiz veritabanına kaydedildi.")
+                    print("Analiz veritabanına başarıyla kaydedildi.")
 
                 except Exception as db_hata:
                     print("Veritabanı kayıt hatası:", db_hata)
@@ -690,10 +679,13 @@ def index():
     map_html = m._repr_html_()
 
     sehir_options = ""
+    # GÜNCELLEME: Giriş ekranındaki şehir seçimi form elemanı (landingSehir) oluşturuldu
+    landing_sehir_options = '<option value="">Şehir seçiniz</option>'
 
     for sehir in sehirler:
         selected = "selected" if sehir == secilen_sehir else ""
         sehir_options += f'<option value="{sehir}" {selected}>{sehir}</option>'
+        landing_sehir_options += f'<option value="{sehir}">{sehir}</option>'
 
     ilce_options = '<option value="">Önce şehir seçiniz</option>'
 
@@ -753,8 +745,6 @@ def index():
         <meta name="theme-color" content="#081120">
 
         <script>
-            // PWA/uygulama icon ayarları sadece telefonda aktif olur.
-            // Böylece bilgisayarda site normal web sitesi gibi açılır.
             if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {{
 
                 const manifest = document.createElement("link");
@@ -793,9 +783,6 @@ def index():
                 --border:rgba(95, 177, 255, 0.25);
             }}
 
-
-
-            /* Splash ekranı masaüstünde görünmez; sadece telefon ekranında açılır. */
             #splash-screen {{
                 display:none;
             }}
@@ -1076,7 +1063,7 @@ def index():
                 display:flex;
                 align-items:center;
                 justify-content:center;
-                background:radial-gradient(circle, rgba(47,137,255,0.28), rgba(0,194,255,0.06));
+                background:radial-gradient(circle, rgba(47,137,255,0.20), rgba(0,194,255,0.06));
                 border:1px solid rgba(95,177,255,0.35);
                 font-size:54px;
                 box-shadow:0 0 45px rgba(47,137,255,0.28);
@@ -1398,7 +1385,7 @@ def index():
             </div>
 
             <div class="landing-center">
-                <div class="landing-panel" role="region" aria-label="RiskAtlas giriş ve konum modu">
+                <div class="landing-panel" role="region" aria-label="RiskAtlas giriş og konum modu">
                     <h1>Risk<span>Atlas</span>'a Hoş Geldiniz</h1>
                     <p>
                         Konumunuza göre deprem risklerini analiz eder, size özel uyarılar ve öneriler sunar.
@@ -1416,16 +1403,22 @@ def index():
                         <button
                             type="button"
                             onclick="konumModunuBaslat()"
-                            aria-label="Konumumu kullan og yakın deprem uyarılarını başlat"
+                            aria-label="Konumumu kullan ve yakın deprem uyarılarını başlat"
                         >
                             📍 Konumumu Kullan
                         </button>
+                        
+                        <div style="width: 100%; margin: 10px 0;">
+                            <select id="landingSehir" style="width: 100%; max-width: 320px;" aria-label="Giriş ekranı hızlı şehir seçimi">
+                                {landing_sehir_options}
+                            </select>
+                        </div>
 
                         <button
                             type="button"
                             class="secondary-btn"
-                            onclick="detayliAnalizeGec()"
-                            aria-label="Konum kullanmadan şehir seçerek detaylı analiz ekranına geç"
+                            onclick="sehirSecerekDevamEt()"
+                            aria-label="Giriş ekranında seçtiğiniz şehirle birlikte analiz ekranına geç"
                         >
                             Şehir Seçerek Devam Et
                         </button>
@@ -1685,15 +1678,12 @@ def index():
         </main>
 
         <script>
-            // Service Worker sadece telefon/PWA kullanımı için kaydedilir.
-            // Masaüstünde eski icon veya PWA davranışı oluşmasını engeller.
             if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
                 navigator.serviceWorker.register("/static/service-worker.js")
                 .then(() => console.log("Service Worker kayıt edildi."))
                 .catch(error => console.log("Service Worker hatası:", error));
             }}
 
-            // Bilgisayarda daha önce kaydedilmiş Service Worker varsa temizlenir.
             if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
                 navigator.serviceWorker.getRegistrations().then(function(registrations) {{
                     for (let registration of registrations) {{
@@ -1765,7 +1755,6 @@ def index():
                 }}
             }}
 
-            // AKILLI SESLİ ASİSTAN SÜREKLİ DİNLEME MODU (Çift Süslü Parantez Düzenlemesi)
             function otomatikSesliAsistanBaslat() {{
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                     console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
@@ -1811,7 +1800,6 @@ def index():
                 }}
             }}
 
-            // SESLİ SELAMLAMA VE ASİSTAN TETİKLEME (Çift Süslü Parantez Düzenlemesi)
             function girisSesliAciklama(kaynak) {{
 
                 if (!sesliYonlendirmeAcikMi()) {{
@@ -1873,6 +1861,18 @@ def index():
                 }}
 
                 girisSesliAciklama('firstInteraction');
+            }}
+
+            // GÜNCELLEME: Giriş ekranından şehir seçilince tetiklenecek fonksiyon
+            function sehirSecerekDevamEt() {{
+                const landingSelect = document.getElementById("landingSehir");
+                const mainSelect = document.getElementById("sehir");
+                
+                if (landingSelect && mainSelect && landingSelect.value) {{
+                    mainSelect.value = landingSelect.value;
+                    ilceleriGuncelle(); // Ana formun ilçelerini otomatik tetikler
+                }}
+                detayliAnalizeGec();
             }}
 
             function detayliAnalizeGec() {{

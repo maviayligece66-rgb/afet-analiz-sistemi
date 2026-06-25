@@ -9,6 +9,7 @@ import unicodedata
 import sqlite3
 from datetime import datetime
 import time
+from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -43,7 +44,7 @@ def veritabani_olustur():
                 tarih TEXT
             )
         """)
-        
+
         # SEYAHAT MODU: Çoklu Şehir Takip Listesi Tablosu
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS takip_edilen_sehirler (
@@ -51,7 +52,7 @@ def veritabani_olustur():
                 sehir TEXT UNIQUE
             )
         """)
-        
+
         # SQLite Performans İndeksi Entegrasyonu
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
 
@@ -67,14 +68,11 @@ veritabani_olustur()
 
 
 def normalize_text(text):
+    if text is None:
+        return ""
     text = str(text).lower()
     text = unicodedata.normalize('NFKD', text)
     return ''.join(c for c in text if not unicodedata.combining(c))
-
-
-def turkce_sirala(liste):
-    """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
-    return sorted(liste, key=lambda x: normalize_text(x))
 
 
 def gorunum_duzelt(text):
@@ -95,6 +93,11 @@ def gorunum_duzelt(text):
     return " ".join(kelimeler)
 
 
+def turkce_sirala(liste):
+    """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
+    return sorted(liste, key=lambda x: normalize_text(x))
+
+
 def tekil_ve_sirali(liste):
     """Büyük/küçük harf farkından doğan tekrarları temizler ve Türkçe uyumlu sıralar."""
     temiz = {}
@@ -112,26 +115,47 @@ def tekil_ve_sirali(liste):
     return turkce_sirala(list(temiz.values()))
 
 
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def afad_depremleri_getir():
     try:
         url = "https://deprem.afad.gov.tr/apiv2/event/latest"
         r = requests.get(url, timeout=3)
 
         if r.status_code == 200:
-            veriler = r.json()
+            veri = r.json()
+
+            if isinstance(veri, list):
+                veriler = veri
+            elif isinstance(veri, dict):
+                veriler = (
+                    veri.get("result")
+                    or veri.get("data")
+                    or veri.get("events")
+                    or veri.get("items")
+                    or []
+                )
+            else:
+                veriler = []
+
             depremler = []
 
             for d in veriler[:30]:
                 try:
-                    mag = float(d.get("magnitude", 0))
-                    lat = float(d.get("latitude", 0))
-                    lon = float(d.get("longitude", 0))
+                    mag = float(d.get("magnitude", d.get("mag", 0)))
+                    lat = float(d.get("latitude", d.get("lat", 0)))
+                    lon = float(d.get("longitude", d.get("lon", 0)))
 
                     depremler.append({
                         "kaynak": "AFAD",
-                        "title": d.get("location", "Bilinmeyen Konum"),
+                        "title": d.get("location", d.get("title", "Bilinmeyen Konum")),
                         "mag": mag,
-                        "date": d.get("date", ""),
+                        "date": d.get("date", d.get("time", "")),
                         "geojson": {
                             "coordinates": [lon, lat]
                         }
@@ -171,6 +195,7 @@ DEPREM_CACHE = {
     "zaman": 0,
     "veri": []
 }
+
 
 def canlı_depremleri_getir():
     simdi = time.time()
@@ -405,7 +430,7 @@ def takip_ekle():
 
 
 # SEYAHAT TAKİP SİSTEMİ: Şehir Takibini Silme Rotaları (GET)
-@app.route("/takip-sil/<sehir>", methods=["GET"])
+@app.route("/takip-sil/<path:sehir>", methods=["GET"])
 def takip_sil(sehir):
     try:
         conn = sqlite3.connect(db_yolu)
@@ -490,7 +515,7 @@ def index():
 
             if "Sehir" in zemin_df.columns and "Ilce" in zemin_df.columns:
                 for sehir, grup in zemin_df.groupby("Sehir"):
-                    mevcut_ilceler = set(ilce_verileri.get(sehir, []))
+                    mevcut_ilceler = set(ilce_verileri.get(gorunum_duzelt(sehir), []))
                     yeni_ilceler = set(grup["Ilce"].dropna().unique().tolist())
                     sehir_temiz = gorunum_duzelt(sehir)
                     ilce_verileri[sehir_temiz] = tekil_ve_sirali(list(mevcut_ilceler.union(yeni_ilceler)))
@@ -558,7 +583,7 @@ def index():
             zemin_riski = float(zemin_bilgisi.get("risk", 5))
 
             inputs = [
-                float(request.form.get(x, 0))
+                safe_float(request.form.get(x, 0))
                 for x in ['n', 'b', 'y', 't', 'i']
             ]
 
@@ -578,11 +603,13 @@ def index():
 
                 res = model.predict(df_test)[0]
 
-                risk_durumu, risk_rengi = {
+                risk_map = {
                     0: ["Güvenli Bölge", "#2ecc71"],
                     1: ["Orta Riskli", "#f39c12"],
                     2: ["Kritik / Riskli", "#e74c3c"]
-                }[res]
+                }
+
+                risk_durumu, risk_rengi = risk_map.get(res, ["Bilinmiyor", "#d9d9d9"])
 
                 risk_skoru = risk_skoru_getir(risk_durumu)
 
@@ -669,7 +696,7 @@ def index():
             cursor = conn.cursor()
             cursor.execute("SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari ORDER BY id DESC LIMIT 5")
             son_analizler_listesi = cursor.fetchall()
-            
+
             cursor.execute("SELECT sehir FROM takip_edilen_sehirler ORDER BY id DESC")
             takip_listesi_json = json.dumps([r[0] for r in cursor.fetchall()], ensure_ascii=False)
             conn.close()
@@ -782,7 +809,7 @@ def index():
             takip_badgeleri_html += f"""
             <span style="background:rgba(0,194,255,0.1); border:1px solid var(--blue2); color:#00c2ff; padding:4px 10px; border-radius:8px; font-size:13px; font-weight:bold; display:inline-flex; align-items:center; gap:6px; margin:4px;">
                 📍 {sehir_adi}
-                <a href="/takip-sil/{sehir_adi}" style="color:var(--danger); text-decoration:none; font-weight:extrabold; margin-left:2px;">×</a>
+                <a href="/takip-sil/{quote(sehir_adi)}" style="color:var(--danger); text-decoration:none; font-weight:extrabold; margin-left:2px;">×</a>
             </span>"""
 
     html = f"""
@@ -1460,7 +1487,7 @@ def index():
                         >
                             📍 Konumumu Kullan
                         </button>
-                        
+
                         <form method="POST" action="/takip-ekle" style="width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 6px 0;">
                             <select name="takipSehirInput" style="width: 100%; max-width: 320px;" aria-label="Giriş ekranı hızlı şehir seçimi">
                                 {landing_sehir_options}
@@ -1709,7 +1736,7 @@ def index():
                 {f'''
                 <div style="margin-top:14px; padding:15px; border-radius:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; gap:12px;">
                     <span style="font-size:36px;">{"🟢" if risk_skoru==1 else "🟡" if risk_skoru==3 else "🔴"}</span>
-                    <span style="font-weight:bold; font-size:16px;">Durum Durumu: {risk_durumu if risk_durumu else "Sistem Analiz Sonucu"}</span>
+                    <span style="font-weight:bold; font-size:16px;">Durum: {risk_durumu if risk_durumu else "Sistem Analiz Sonucu"}</span>
                 </div>
                 ''' if risk_skoru > 0 else ""}
 
@@ -1861,7 +1888,7 @@ def index():
                                             ilceleriGuncelle();
                                             sesliBilgi("Şehir alanı sesle seçildi " + sehirSelect.options[i].text);
                                             break;
-                                        }
+                                        }}
                                     }}
                                 }}
                             }}
@@ -1889,22 +1916,22 @@ def index():
 
             function seyahatListesiDepremDenetle() {{
                 if (!pythonTakipListesi || pythonTakipListesi.length === 0) return;
-                
+
                 depremVerileri.forEach(function(d) {{
                     const mag = parseFloat(d.mag || 0);
                     const titleFix = d.title ? d.title.toLowerCase() : "";
-                    
+
                     if (mag >= 4.5) {{
                         pythonTakipListesi.forEach(function(takipSehir) {{
                             const normTakip = takipSehir.toLowerCase();
                             if (titleFix.includes(normTakip)) {{
                                 const uyariMetni = takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
                                 document.getElementById("alertMainParagraph").innerText = uyariMetni;
-                                
+
                                 if (navigator.vibrate) {{
                                     navigator.vibrate([400, 200, 400, 200, 800, 200, 400]);
                                 }}
-                                
+
                                 document.getElementById("emergencyAlert").style.display = "block";
                                 sesliBilgi(uyariMetni);
                             }}
@@ -1964,7 +1991,7 @@ def index():
             function sehirSecerekDevamEt() {{
                 const landingSelect = document.querySelector("select[name='takipSehirInput']");
                 const mainSelect = document.getElementById("sehir");
-                
+
                 if (landingSelect && mainSelect && landingSelect.value) {{
                     mainSelect.value = landingSelect.value;
                     ilceleriGuncelle();
@@ -2270,7 +2297,7 @@ def index():
                             const tahminiMesafe = Math.max(100, Math.round(150000 / (toplanmaGirdisi + 1)));
                             const yonlerListesi = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Batı"];
                             const uretilenYon = yonlerListesi[Math.floor(Math.random() * yonlerListesi.length)];
-                            
+
                             const yonlendirmeMetni = " En yakın güvenli toplanma alanı tahmini " + tahminiMesafe + " metre " + uretilenYon + " yönündedir.";
 
                             if (sonucMetni && sesliYonlendirmeAcikMi()) {{
@@ -2377,3 +2404,4 @@ def gecmis():
 
 if __name__ == "__main__":
     app.run(debug=True)
+

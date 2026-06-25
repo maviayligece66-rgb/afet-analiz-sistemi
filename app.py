@@ -663,7 +663,6 @@ def index():
             tahmin_sonucu = "Veri hatası!"
             print("Model hata:", e)
 
-    # Veritabanı canlı geçmiş ve takip edilen seyahat şehirleri listesini çekme paneli
     if os.path.exists(db_yolu):
         try:
             conn = sqlite3.connect(db_yolu)
@@ -758,7 +757,6 @@ def index():
 
     oneriler_html = "".join([f"<li>{o}</li>" for o in oneriler])
 
-    # ERİŞİLEBİLİRLİK: Canlı Ön Panel Geçmiş Kayıtları HTML Tablosu Üretici
     if son_analizler_listesi:
         gecmis_panel_html = '<div class="earthquake-list" style="margin-top:20px;"><h3>📋 Son Veritabanı Geçmişi</h3><table style="width:100%; border-collapse:collapse;"><thead><tr style="text-align:left; background:rgba(0,0,0,0.2);"><th style="padding:10px;">Şehir</th><th style="padding:10px;">İlçe</th><th style="padding:10px;">Risk Durumu</th><th style="padding:10px;">Tarih</th></tr></thead><tbody>'
         for r in son_analizler_listesi:
@@ -777,7 +775,6 @@ def index():
 
     deprem_verileri_json = json.dumps(tum_depremler[:30], ensure_ascii=False)
 
-    # SEYAHAT ETİKETLERİ BÖLÜMÜ HTML ÜRETİCİ
     takip_listesi_python = json.loads(takip_listesi_json)
     takip_badgeleri_html = ""
     if takip_listesi_python:
@@ -798,8 +795,6 @@ def index():
         <meta name="theme-color" content="#081120">
 
         <script>
-            // PWA/uygulama icon ayarları sadece telefonda aktif olur.
-            // Böylece bilgisayarda site normal web sitesi gibi açılır.
             if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {{
 
                 const manifest = document.createElement("link");
@@ -838,9 +833,6 @@ def index():
                 --border:rgba(95, 177, 255, 0.25);
             }}
 
-
-
-            /* Splash ekranı masaüstünde görünmez; sadece telefon ekranında açılır. */
             #splash-screen {{
                 display:none;
             }}
@@ -1554,7 +1546,7 @@ def index():
                     <div class="feature-icon">👥</div>
                     <div>
                         <b>Herkes İçin Erişilebilir</b>
-                        <span>Engelli bireyler düşünvelerek tasarlandı.</span>
+                        <span>Engelli bireyler düşünülerek tasarlandı.</span>
                     </div>
                 </div>
             </div>
@@ -1629,7 +1621,7 @@ def index():
                     type="number"
                     step="any"
                     name="n"
-                    placeholder="Örn: 5000 kişi/km²"
+                    placeholder="Örn: 5000"
                     required
                 >
                 <small>
@@ -1691,7 +1683,7 @@ def index():
 
             <div class="example-box">
                 <b>📌 Örnek Değer Rehberi:</b><br><br>
-                • <b>Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu:</b> 5000 kişi/km² → bulunduğunuz mahalle veya ilçedeki genel yoğunluğu temsil eder.<br>
+                • <b>Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu:</b> 5000 → bulunduğunuz mahalle veya ilçedeki genel yoğunluğu temsil eder.<br>
                 • <b>Bina Yaşı:</b> 20 → bölgedeki ortalama bina yaşı gibi düşünülmelidir.<br>
                 • <b>Yatak Kapasitesi:</b> 1000 → hastane/acil durum kapasitesini temsil eder.<br>
                 • <b>Toplanma Alanı:</b> 50000 → m² cinsinden düşünülebilir; yüksek değer daha avantajlıdır.<br>
@@ -1738,33 +1730,30 @@ def index():
 
             {f'''
             <div class="suggestion-box">
-                <h3>🧭 Acil Durum Öneri Sistemi og Tahmini Sesli Yön Bulucu</h3>
+                <h3>🧭 Acil Durum Öneri Sistemi ve Tahmini Sesli Yön Bulucu</h3>
                 <ul>{oneriler_html}</ul>
             </div>
             ''' if oneriler else ""}
 
             <div class="accessibility-note">
                 <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
-                ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm og mobil ritmik güçlü titreşim desenleri (Vibration API)<br>
+                ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm ve mobil ritmik güçlü titreşim desenleri (Vibration API)<br>
                 ✅ Mobil cihazlarda titreşim desteği<br>
                 ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde veya sayfa yüklendiği an selamlama bittiğinde otomatik çalışan akıllı eller serbest asistan dinleme yapısı<br>
-                ✅ Harita altında ekran okuyucu uyumlu deprem listesi og veritabanı tabloları<br>
+                ✅ Harita altında ekran okuyucu uyumlu deprem listesi ve veritabanı tabloları<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
-                ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı og zihinsel engelli bireyler için evrensel sembol tasarımı
+                ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı ve zihinsel engelli bireyler için evrensel sembol tasarımı
             </div>
         </div>
         </main>
 
         <script>
-            // Service Worker sadece telefon/PWA kullanımı için kaydedilir.
-            // Masaüstünde eski icon veya PWA davranışı oluşmasını engeller.
             if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
                 navigator.serviceWorker.register("/static/service-worker.js")
                 .then(() => console.log("Service Worker kayıt edildi."))
                 .catch(error => console.log("Service Worker hatası:", error));
             }}
 
-            // Bilgisayarda daha önce kaydedilmiş Service Worker varsa temizlenir.
             if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && "serviceWorker" in navigator) {{
                 navigator.serviceWorker.getRegistrations().then(function(registrations) {{
                     for (let registration of registrations) {{
@@ -1837,7 +1826,6 @@ def index():
                 }}
             }}
 
-            // GÜNCELLEME: AKILLI SESLİ ASİSTAN SÜREKLİ DİNLEME MODU (Genişletilmiş Eller Serbest Navigasyon)
             function otomatikSesliAsistanBaslat() {{
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                     console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
@@ -1899,7 +1887,6 @@ def index():
                 }}
             }}
 
-            // GÜNCELLEME: SEYAHAT MODU ARKA PLAN DOĞRULAMA MOTORU
             function seyahatListesiDepremDenetle() {{
                 if (!pythonTakipListesi || pythonTakipListesi.length === 0) return;
                 
@@ -1914,7 +1901,6 @@ def index():
                                 const uyariMetni = takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
                                 document.getElementById("alertMainParagraph").innerText = uyariMetni;
                                 
-                                // Ritmik Titreşim Desenleri Tetiklenmesi (İşitme Engelli Paket)
                                 if (navigator.vibrate) {{
                                     navigator.vibrate([400, 200, 400, 200, 800, 200, 400]);
                                 }}
@@ -1956,7 +1942,6 @@ def index():
                     mesaj1.pitch = 1;
 
                     mesaj1.onend = function () {{
-                        // Selamlama bittiği an asistan sürekli dinleme moduna geçer (Buton tetiklemesi beklemez)
                         otomatikSesliAsistanBaslat();
                     }};
 
@@ -2230,7 +2215,6 @@ def index():
             }}
 
             window.onload = function () {{
-                // Seyahat takip listesindeki şehirler için arka plan deprem kontrol döngüsü tetiklenir
                 seyahatListesiDepremDenetle();
 
                 if (window.innerWidth <= 700) {{
@@ -2281,7 +2265,6 @@ def index():
                                 block: "start"
                             }});
 
-                            // GÖRME ENGELLİLER PAKETİ: YÖN BULUCU VE ANALİZ SONUCUNUN ANINDA SESLENDİRİLMESİ
                             const sonucMetni = sonucAlani.innerText.trim();
                             const toplanmaGirdisi = parseFloat(document.getElementById("t").value || 0);
                             const tahminiMesafe = Math.max(100, Math.round(150000 / (toplanmaGirdisi + 1)));
@@ -2308,7 +2291,6 @@ def index():
 
 @app.route("/gecmis")
 def gecmis():
-    """SQLite veritabanına kaydedilen analiz geçmişini gösterir."""
     try:
         conn = sqlite3.connect(db_yolu)
         df = pd.read_sql_query("""

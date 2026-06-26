@@ -9,7 +9,6 @@ import unicodedata
 import sqlite3
 from datetime import datetime
 import time
-from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -23,7 +22,7 @@ ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
 zemin_yolu = os.path.join(base, 'datasets', 'zemin_verileri.csv')
 
 
-# SQLite veritabanı, analiz kayıt ve seyahat takip tabloları otomatik oluşturulur.
+# SQLite veritabanı, kalıcı ev konumu, analiz kayıt ve seyahat takip tabloları otomatik oluşturulur.
 def veritabani_olustur():
     try:
         os.makedirs(os.path.dirname(db_yolu), exist_ok=True)
@@ -44,7 +43,7 @@ def veritabani_olustur():
                 tarih TEXT
             )
         """)
-
+        
         # SEYAHAT MODU: Çoklu Şehir Takip Listesi Tablosu
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS takip_edilen_sehirler (
@@ -52,7 +51,7 @@ def veritabani_olustur():
                 sehir TEXT UNIQUE
             )
         """)
-
+        
         # SQLite Performans İndeksi Entegrasyonu
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
 
@@ -68,11 +67,14 @@ veritabani_olustur()
 
 
 def normalize_text(text):
-    if text is None:
-        return ""
     text = str(text).lower()
     text = unicodedata.normalize('NFKD', text)
     return ''.join(c for c in text if not unicodedata.combining(c))
+
+
+def turkce_sirala(liste):
+    """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
+    return sorted(liste, key=lambda x: normalize_text(x))
 
 
 def gorunum_duzelt(text):
@@ -93,11 +95,6 @@ def gorunum_duzelt(text):
     return " ".join(kelimeler)
 
 
-def turkce_sirala(liste):
-    """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
-    return sorted(liste, key=lambda x: normalize_text(x))
-
-
 def tekil_ve_sirali(liste):
     """Büyük/küçük harf farkından doğan tekrarları temizler ve Türkçe uyumlu sıralar."""
     temiz = {}
@@ -115,47 +112,26 @@ def tekil_ve_sirali(liste):
     return turkce_sirala(list(temiz.values()))
 
 
-def safe_float(value, default=0.0):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def afad_depremleri_getir():
     try:
         url = "https://deprem.afad.gov.tr/apiv2/event/latest"
         r = requests.get(url, timeout=3)
 
         if r.status_code == 200:
-            veri = r.json()
-
-            if isinstance(veri, list):
-                veriler = veri
-            elif isinstance(veri, dict):
-                veriler = (
-                    veri.get("result")
-                    or veri.get("data")
-                    or veri.get("events")
-                    or veri.get("items")
-                    or []
-                )
-            else:
-                veriler = []
-
+            veriler = r.json()
             depremler = []
 
             for d in veriler[:30]:
                 try:
-                    mag = float(d.get("magnitude", d.get("mag", 0)))
-                    lat = float(d.get("latitude", d.get("lat", 0)))
-                    lon = float(d.get("longitude", d.get("lon", 0)))
+                    mag = float(d.get("magnitude", 0))
+                    lat = float(d.get("latitude", 0))
+                    lon = float(d.get("longitude", 0))
 
                     depremler.append({
                         "kaynak": "AFAD",
-                        "title": d.get("location", d.get("title", "Bilinmeyen Konum")),
+                        "title": d.get("location", "Bilinmeyen Konum"),
                         "mag": mag,
-                        "date": d.get("date", d.get("time", "")),
+                        "date": d.get("date", ""),
                         "geojson": {
                             "coordinates": [lon, lat]
                         }
@@ -195,7 +171,6 @@ DEPREM_CACHE = {
     "zaman": 0,
     "veri": []
 }
-
 
 def canlı_depremleri_getir():
     simdi = time.time()
@@ -285,7 +260,7 @@ def acil_oneriler_uret(risk_durumu, inputs):
             "Bu bölgede acil tahliye planı oluşturulmalıdır.",
             "Toplanma alanı kapasitesi artırılmalıdır.",
             "Eski yapılar için bina dayanıklılık analizi ve güçlendirme önerilir.",
-            "Hastane, itfaiye ve ana ulaşım yolları önceliklendirilmelidir."
+            "Hastane, itfaiye and ana ulaşım yolları önceliklendirilmelidir."
         ])
 
     if bina_yasi >= 25:
@@ -430,7 +405,7 @@ def takip_ekle():
 
 
 # SEYAHAT TAKİP SİSTEMİ: Şehir Takibini Silme Rotaları (GET)
-@app.route("/takip-sil/<path:sehir>", methods=["GET"])
+@app.route("/takip-sil/<sehir>", methods=["GET"])
 def takip_sil(sehir):
     try:
         conn = sqlite3.connect(db_yolu)
@@ -515,7 +490,7 @@ def index():
 
             if "Sehir" in zemin_df.columns and "Ilce" in zemin_df.columns:
                 for sehir, grup in zemin_df.groupby("Sehir"):
-                    mevcut_ilceler = set(ilce_verileri.get(gorunum_duzelt(sehir), []))
+                    mevcut_ilceler = set(ilce_verileri.get(sehir, []))
                     yeni_ilceler = set(grup["Ilce"].dropna().unique().tolist())
                     sehir_temiz = gorunum_duzelt(sehir)
                     ilce_verileri[sehir_temiz] = tekil_ve_sirali(list(mevcut_ilceler.union(yeni_ilceler)))
@@ -583,7 +558,7 @@ def index():
             zemin_riski = float(zemin_bilgisi.get("risk", 5))
 
             inputs = [
-                safe_float(request.form.get(x, 0))
+                float(request.form.get(x, 0))
                 for x in ['n', 'b', 'y', 't', 'i']
             ]
 
@@ -603,13 +578,11 @@ def index():
 
                 res = model.predict(df_test)[0]
 
-                risk_map = {
+                risk_durumu, risk_rengi = {
                     0: ["Güvenli Bölge", "#2ecc71"],
                     1: ["Orta Riskli", "#f39c12"],
                     2: ["Kritik / Riskli", "#e74c3c"]
-                }
-
-                risk_durumu, risk_rengi = risk_map.get(res, ["Bilinmiyor", "#d9d9d9"])
+                }[res]
 
                 risk_skoru = risk_skoru_getir(risk_durumu)
 
@@ -696,7 +669,7 @@ def index():
             cursor = conn.cursor()
             cursor.execute("SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari ORDER BY id DESC LIMIT 5")
             son_analizler_listesi = cursor.fetchall()
-
+            
             cursor.execute("SELECT sehir FROM takip_edilen_sehirler ORDER BY id DESC")
             takip_listesi_json = json.dumps([r[0] for r in cursor.fetchall()], ensure_ascii=False)
             conn.close()
@@ -809,7 +782,7 @@ def index():
             takip_badgeleri_html += f"""
             <span style="background:rgba(0,194,255,0.1); border:1px solid var(--blue2); color:#00c2ff; padding:4px 10px; border-radius:8px; font-size:13px; font-weight:bold; display:inline-flex; align-items:center; gap:6px; margin:4px;">
                 📍 {sehir_adi}
-                <a href="/takip-sil/{quote(sehir_adi)}" style="color:var(--danger); text-decoration:none; font-weight:extrabold; margin-left:2px;">×</a>
+                <a href="/takip-sil/{sehir_adi}" style="color:var(--danger); text-decoration:none; font-weight:extrabold; margin-left:2px;">×</a>
             </span>"""
 
     html = f"""
@@ -1432,7 +1405,7 @@ def index():
         </style>
     </head>
 
-    <body>
+    <body id="mainBody">
 
         <div id="splash-screen">
             <img src="/static/splash/splash.png" alt="RiskAtlas Açılış Ekranı" class="splash-image">
@@ -1451,6 +1424,9 @@ def index():
                 <div class="top-actions">
                     <button type="button" onclick="location.href='/gecmis'" aria-label="Tüm veritabanı analiz geçmişini gör">
                         📋 Geçmiş Analizler
+                    </button>
+                    <button type="button" id="aiRobotToggleBtn" onclick="aiRobotAyariniDegistir()" style="background:rgba(128,0,128,0.22); border:1px solid purple;">
+                        🤖 Yapay Zekâ Robotu: Açık
                     </button>
                     <button type="button" onclick="girisSesliAciklama('manual')" aria-label="Erişilebilir sesli rehberi başlat">
                         ♿ Erişilebilir Sesli Rehber
@@ -1473,7 +1449,7 @@ def index():
 
                     <div class="location-symbol" aria-hidden="true">📍</div>
 
-                    <h2>Güvenliğiniz için konumunuzu kullanıyoruz.</h2>
+                    <h2 id="anaEvGosterge">Mevcut Ev Konumunuz: Konya (Hafızada Kayıtlı)</h2>
                     <p>
                         4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkilenebiliyorsa sizi uyarır,
                         uzak depremler için gereksiz alarm vermez.
@@ -1487,12 +1463,12 @@ def index():
                         >
                             📍 Konumumu Kullan
                         </button>
-
+                        
                         <form method="POST" action="/takip-ekle" style="width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 6px 0;">
-                            <select name="takipSehirInput" style="width: 100%; max-width: 320px;" aria-label="Giriş ekranı hızlı şehir seçimi">
+                            <select id="takipSehirSecimAlani" name="takipSehirInput" style="width: 100%; max-width: 320px;" aria-label="Giriş ekranı hızlı şehir seçimi" onchange="evKonumunuGuncelle(this.value)">
                                 {landing_sehir_options}
                             </select>
-                            <button type="submit" style="width: 100%; max-width: 320px; background:linear-gradient(135deg, var(--blue2), #0077b6); font-size:14px; padding:8px 12px; margin-top:2px;">
+                            <button type="button" onclick="buSehriTakibeEkle()" style="width: 100%; max-width: 320px; background:linear-gradient(135deg, var(--blue2), #0077b6); font-size:14px; padding:8px 12px; margin-top:2px;">
                                 📍 Bu Şehri Seyahat Takip Listeme Ekle
                             </button>
                         </form>
@@ -1624,7 +1600,7 @@ def index():
 
         <div class="box">
 
-            <form method="POST">
+            <form method="POST" id="analizFormuElementi">
 
                 <label for="sehir">Şehir Seçiniz</label>
                 <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
@@ -1736,7 +1712,7 @@ def index():
                 {f'''
                 <div style="margin-top:14px; padding:15px; border-radius:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; gap:12px;">
                     <span style="font-size:36px;">{"🟢" if risk_skoru==1 else "🟡" if risk_skoru==3 else "🔴"}</span>
-                    <span style="font-weight:bold; font-size:16px;">Durum: {risk_durumu if risk_durumu else "Sistem Analiz Sonucu"}</span>
+                    <span style="font-weight:bold; font-size:16px;">Durum Durumu: {risk_durumu if risk_durumu else "Sistem Analiz Sonucu"}</span>
                 </div>
                 ''' if risk_skoru > 0 else ""}
 
@@ -1797,6 +1773,79 @@ def index():
 
             let girisRehberiEtkilesimleBasladi = false;
 
+            // KALICI HAFIZA VE ROBOT AYARLARI ALTYAPISI
+            let aktifEvKonumu = localStorage.getItem("riskAtlasAnaEvKonumu") || "Konya";
+            let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
+
+            function aiRobotAyariniGuncelle() {{
+                const btn = document.getElementById("aiRobotToggleBtn");
+                if(!btn) return;
+                if(aiRobotAktifMi) {{
+                    btn.textContent = "🤖 Yapay Zekâ Robotu: Açık";
+                    btn.style.background = "rgba(128,0,128,0.22)";
+                }} else {{
+                    btn.textContent = "🤖 Yapay Zekâ Robotu: Kapalı";
+                    btn.style.background = "rgba(255,255,255,0.10)";
+                    window.speechSynthesis.cancel();
+                }}
+            }}
+
+            function aiRobotAyariniDegistir() {{
+                aiRobotAktifMi = !aiRobotAktifMi;
+                localStorage.setItem("riskAtlasAiRobotAyar", aiRobotAktifMi ? "acik" : "kapali");
+                aiRobotAyariniGuncelle();
+                if(aiRobotAktifMi) {{
+                    robotKonus veSoruSor("Yapay zekâ robotu yeniden aktif hale getirildi. Size yardımcı olmak için dinliyorum.");
+                }}
+            }}
+
+            function evKonumunuGuncelle(sehir) {{
+                if(!sehir) return;
+                aktifEvKonumu = sehir;
+                localStorage.setItem("riskAtlasAnaEvKonumu", sehir);
+                const gosterge = document.getElementById("anaEvGosterge");
+                if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + sehir + " (Hafızada Kayıtlı)";
+                
+                const sehirSelect = document.getElementById("sehir");
+                if(sehirSelect) {{
+                    sehirSelect.value = sehir;
+                    ilceleriGuncelle();
+                }}
+                robotKonus veSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak güncellendi ve kalıcı hafızaya alındı.");
+            }}
+
+            function buSehriTakibeEkle() {{
+                const form = document.querySelector("form[action='/takip-ekle']");
+                if(form) form.submit();
+            }}
+
+            function robotKonus(metin) {{
+                if (!aiRobotAktifMi) return;
+                if ("speechSynthesis" in window) {{
+                    const mesaj = new SpeechSynthesisUtterance(metin);
+                    mesaj.lang = "tr-TR";
+                    mesaj.rate = 0.92;
+                    window.speechSynthesis.cancel();
+                    setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
+                }}
+            }}
+
+            function robotKonusveSoruSor(metin, soruMu = false) {{
+                if (!aiRobotAktifMi) return;
+                if ("speechSynthesis" in window) {{
+                    const mesaj = new SpeechSynthesisUtterance(metin);
+                    mesaj.lang = "tr-TR";
+                    mesaj.rate = 0.92;
+                    window.speechSynthesis.cancel();
+                    mesaj.onend = function() {{
+                        if(soruMu) {{
+                            console.log("Robot soru sordu, dinleme modu tetikleniyor...");
+                        }}
+                    }};
+                    setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
+                }}
+            }}
+
             function sesliYonlendirmeAcikMi() {{
                 return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali";
             }}
@@ -1853,7 +1902,9 @@ def index():
                 }}
             }}
 
+            // INTERAKTİF SESLİ ASİSTAN VE YAPAY ZEKÂ ROBOTU (MİKROFON MOTORU)
             function otomatikSesliAsistanBaslat() {{
+                if (!aiRobotAktifMi) return;
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                     console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
                     return;
@@ -1869,71 +1920,58 @@ def index():
                     for (let i = event.resultIndex; i < event.results.length; ++i) {{
                         if (event.results[i].isFinal) {{
                             const komut = event.results[i][0].transcript.trim().toLowerCase();
-                            console.log("Algılanan Sesli Komut:", komut);
+                            console.log("Yapay Zekâ Algıladı:", komut);
 
                             if (komut.includes("analiz ekranı") || komut.includes("formu aç")) {{
                                 sehirSecerekDevamEt();
                             }} else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat") || komut.includes("sustur")) {{
                                 acilDurumKapat();
                             }} else if (komut.includes("analiz et") || komut.includes("hesapla")) {{
-                                document.querySelector("form").submit();
-                            }} else if (komut.includes("şehir") || komut.includes("konum")) {{
-                                const kelimeler = komut.split("şehir");
-                                if(kelimeler.length > 1 && kelimeler[1].trim()) {{
-                                    const hedefSehir = kelimeler[1].trim();
-                                    const sehirSelect = document.getElementById("sehir");
-                                    for(let i=0; i<sehirSelect.options.length; i++) {{
-                                        if(sehirSelect.options[i].text.toLowerCase().includes(hedefSehir)) {{
-                                            sehirSelect.selectedIndex = i;
-                                            ilceleriGuncelle();
-                                            sesliBilgi("Şehir alanı sesle seçildi " + sehirSelect.options[i].text);
-                                            break;
-                                        }}
-                                    }}
+                                document.getElementById("analizFormuElementi").submit();
+                            }} else if (komut.includes("evimi") || komut.includes("ana konumumu")) {{
+                                let sehirBul = komut.replace("evimi", "").replace("ana konumumu", "").replace("yap", "").trim();
+                                if(sehirBul) {{
+                                    let sehirDüzgün = sehirBul.charAt(0).toUpperCase() + sehirBul.slice(1);
+                                    evKonumunuGuncelle(sehirDüzgün);
                                 }}
+                            }} else if (komut.includes("yardım et") || komut.includes("neredeyim")) {{
+                                robotKonusveSoruSor("Şu anda giriş ekranındasınız. Hafızadaki ev konumunuz " + aktifEvKonumu + " olarak ayarlanmıştır. Başka bir işlem yapmak ister misiniz?", true);
                             }}
                         }}
                     }}
                 }};
 
-                recognition.onerror = function(event) {{
-                    console.error("Ses tanıma hatası:", event.error);
-                }};
-
                 recognition.onend = function() {{
-                    if (sesliYonlendirmeAcikMi()) {{
+                    if (aiRobotAktifMi) {{
                         try {{ recognition.start(); }} catch(e) {{}}
                     }}
                 }};
 
                 try {{
                     recognition.start();
-                    console.log("Akıllı sesli asistan sürekli dinleme modunda aktif.");
-                }} catch(e) {{
-                    console.error("Ses tanıma başlatılamadı:", e);
-                }}
+                }} catch(e) {{}}
             }}
 
             function seyahatListesiDepremDenetle() {{
                 if (!pythonTakipListesi || pythonTakipListesi.length === 0) return;
-
+                
                 depremVerileri.forEach(function(d) {{
                     const mag = parseFloat(d.mag || 0);
                     const titleFix = d.title ? d.title.toLowerCase() : "";
-
+                    
                     if (mag >= 4.5) {{
                         pythonTakipListesi.forEach(function(takipSehir) {{
                             const normTakip = takipSehir.toLowerCase();
                             if (titleFix.includes(normTakip)) {{
-                                const uyariMetni = takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
+                                const uyariMetni = "Dikkat! Seyahat listenizdeki " + takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
                                 document.getElementById("alertMainParagraph").innerText = uyariMetni;
-
+                                
                                 if (navigator.vibrate) {{
                                     navigator.vibrate([400, 200, 400, 200, 800, 200, 400]);
                                 }}
-
+                                
                                 document.getElementById("emergencyAlert").style.display = "block";
-                                sesliBilgi(uyariMetni);
+                                robotKonus(uyariMetni);
                             }}
                         }});
                     }}
@@ -1941,68 +1979,43 @@ def index():
             }}
 
             function girisSesliAciklama(kaynak) {{
-
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
+                if (!aiRobotAktifMi) return;
                 if (kaynak === 'manual' || kaynak === 'firstInteraction') {{
                     girisRehberiEtkilesimleBasladi = true;
                 }}
 
                 const metin =
-                    "RiskAtlas erişilebilir afet bilgilendirme sistemine hoş geldiniz. " +
-                    "Sesli yönlendirme varsayılan olarak açıktır. İsterseniz ayarlar kısmındaki sesli yönlendirme düğmesinden bu özelliği kapatabilirsiniz. " +
-                    "Bu rehber, görme engelli kullanıcıların uygulamayı daha rahat kullanabilmesi için hazırlanmıştır. " +
-                    "Konumumu kullan butonuna bastığınızda sistem sizden konum izni isteyecektir. " +
-                    "İzin verirseniz yakınınızdaki kritik depremler kontrol edilir. " +
-                    "İsterseniz şehir seçerek detaylı analiz ekranına da geçebilirsiniz. " +
-                    "Sesli selamlama bittiğinde akıllı eller serbest asistan otomatik olarak sürekli dinleme moduna geçecektir.";
+                    "RiskAtlas interaktif yapay zekâ sesli asistan sistemine hoş geldiniz. " +
+                    "Uygulama hafızası etkindir. Şu anda ev konumunuz kalıcı olarak " + aktifEvKonumu + " şeklinde ayarlanmıştır. " +
+                    "Her girişte form doldurmak zorunda kalmazsınız. Seyahat listenizdeki ek şehirlerde risk algılandığında sistem sizi sesle uyaracaktır. " +
+                    "Sesli robotumuz sizi dinlemektedir, bana komut verebilir veya soru sorabilirsiniz.";
 
                 if ("speechSynthesis" in window) {{
-
                     window.speechSynthesis.cancel();
-
                     const mesaj1 = new SpeechSynthesisUtterance(metin);
                     mesaj1.lang = "tr-TR";
-                    mesaj1.rate = 0.9;
-                    mesaj1.pitch = 1;
-
+                    mesaj1.rate = 0.92;
                     mesaj1.onend = function () {{
                         otomatikSesliAsistanBaslat();
                     }};
-
                     window.speechSynthesis.speak(mesaj1);
                 }}
             }}
 
             function ilkEtkilesimdeSesliRehberiBaslat() {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if (girisRehberiEtkilesimleBasladi) {{
-                    return;
-                }}
-
+                if (!aiRobotAktifMi) return;
+                if (girisRehberiEtkilesimleBasladi) return;
                 girisSesliAciklama('firstInteraction');
             }}
 
             function sehirSecerekDevamEt() {{
-                const landingSelect = document.querySelector("select[name='takipSehirInput']");
-                const mainSelect = document.getElementById("sehir");
-
-                if (landingSelect && mainSelect && landingSelect.value) {{
-                    mainSelect.value = landingSelect.value;
-                    ilceleriGuncelle();
-                }}
                 detayliAnalizeGec();
             }}
 
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
                 document.getElementById("mainContent").classList.add("active");
-                sesliBilgi("Detaylı analiz ekranına geçildi.");
+                robotKonus("Detaylı analiz ekranına geçildi. Harita ve parametre formları yüklendi.");
             }}
 
             function mesafeKm(lat1, lon1, lat2, lon2) {{
@@ -2047,69 +2060,35 @@ def index():
                                 }};
                             }}
                         }}
-                    }} catch (e) {{
-                        console.log("Yakın deprem kontrol hatası:", e);
-                    }}
+                    }} catch (e) {{}}
                 }});
 
                 if (yakinKritik) {{
                     document.getElementById("konumDurumu").innerHTML =
-                        "Yakınınızda kritik deprem algılandı: " +
-                        yakinKritik.title +
-                        " - Büyüklük: " +
-                        yakinKritik.mag +
-                        " - Yaklaşık uzaklık: " +
-                        yakinKritik.uzaklik +
-                        " km.";
-
-                    sesliBilgi(
-                        "Dikkat. Yakınınızda kritik seviyede deprem algılandı. Güvenli alana geçin. Asansör kullanmayın."
-                    );
-
+                        "Yakınınızda kritik deprem algılandı: " + yakinKritik.title + " - Büyüklük: " + yakinKritik.mag;
+                    robotKonus("Dikkat. Yakınınızda kritik seviyede deprem uyarısı var. Güvenli alanlara geçiş yapın.");
                     acilDurumGoster();
                 }} else {{
-                    document.getElementById("konumDurumu").innerHTML =
-                        "Konum alındı. Yakınınızda kritik seviyede deprem uyarısı bulunmuyor.";
-
-                    sesliBilgi("Konum alındı. Yakınınızda kritik seviyede deprem uyarısı bulunmuyor.");
+                    document.getElementById("konumDurumu").innerHTML = "Konum tarandı. Yakınınızda aktif kritik alarm bulunmuyor.";
+                    robotKonus("Konum tarandı. Yakınınızda aktif kritik alarm bulunmuyor.");
                 }}
             }}
 
             function konumModunuBaslat() {{
-                sesliBilgi(
-                    "Şimdi konum izni istenecek. Açılan pencerede izin ver seçeneğini seçerseniz yakın deprem uyarıları başlatılacaktır."
-                );
-
+                robotKonus("Konum analizi başlatılıyor. Lütfen gelen tarayıcı penceresinde izin ver seçeneğini onaylayın.");
                 const durum = document.getElementById("konumDurumu");
-
                 if (!navigator.geolocation) {{
-                    durum.innerHTML = "Bu cihazda konum özelliği desteklenmiyor.";
-                    sesliBilgi("Bu cihazda konum özelliği desteklenmiyor.");
+                    durum.innerHTML = "Bu cihaz konum özelliğini desteklemiyor.";
                     return;
                 }}
-
-                durum.innerHTML = "Konum izni bekleniyor...";
-
+                durum.innerHTML = "Konum verisi alınıyor...";
                 navigator.geolocation.getCurrentPosition(
                     function(position) {{
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-
-                        durum.innerHTML = "Konum alındı. Yakın deprem verileri kontrol ediliyor.";
-                        yakinDepremKontrolEt(lat, lon);
+                        yakinDepremKontrolEt(position.coords.latitude, position.coords.longitude);
                     }},
                     function(error) {{
-                        durum.innerHTML =
-                            "Konum izni alınamadı. İsterseniz şehir seçerek detaylı analiz ekranına geçebilirsiniz.";
-
-                        sesliBilgi(
-                            "Konum izni alınamadı. İsterseniz şehir seçerek detaylı analiz ekranına geçebilirsiniz."
-                        );
-                    }},
-                    {{
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 60000
+                        durum.innerHTML = "Konum izni reddedildi.";
+                        robotKonus("Konum izni alınamadı. İşleme şehir seçerek devam edebilirsiniz.");
                     }}
                 );
             }}
@@ -2200,112 +2179,47 @@ def index():
                 }});
             }}
 
-            function sesliUyariVer() {{
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(
-                        "Dikkat. Canlı deprem verisinde kritik seviyede deprem tespit edildi. Güvenli alana geçin. Asansör kullanmayın. Toplanma alanına yönelin."
-                    );
-
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.9;
-                    mesaj.pitch = 1;
-
-                    window.speechSynthesis.cancel();
-
-                    setTimeout(() => {{
-                        window.speechSynthesis.speak(mesaj);
-                    }}, 200);
-                }}
-            }}
-
             function acilDurumGoster() {{
-                const alertBox = document.getElementById("emergencyAlert");
-                alertBox.style.display = "block";
-
-                if (navigator.vibrate) {{
-                    navigator.vibrate([500, 300, 500, 300, 1000]);
-                }}
-
-                sesliUyariVer();
+                document.getElementById("emergencyAlert").style.display = "block";
+                if (navigator.vibrate) navigator.vibrate([500, 300, 500, 300, 1000]);
             }}
 
             function acilDurumKapat() {{
                 document.getElementById("emergencyAlert").style.display = "none";
-
-                if (navigator.vibrate) {{
-                    navigator.vibrate(0);
-                }}
-
-                if ("speechSynthesis" in window) {{
-                    window.speechSynthesis.cancel();
-                }}
+                if (navigator.vibrate) navigator.vibrate(0);
+                window.speechSynthesis.cancel();
             }}
 
             window.onload = function () {{
-                seyahatListesiDepremDenetle();
-
-                if (window.innerWidth <= 700) {{
-                    setTimeout(function () {{
-                        const splash = document.getElementById("splash-screen");
-                        if (splash) {{
-                            splash.classList.add("fade-out");
-                            setTimeout(function () {{
-                                splash.remove();
-                            }}, 800);
-                        }}
-                    }}, 1800);
-                }} else {{
-                    const splash = document.getElementById("splash-screen");
-                    if (splash) {{
-                        splash.remove();
-                    }}
+                // Hafızadaki ev konumunu başlangıçta yükle ve göstergeyi ayarla
+                const gosterge = document.getElementById("anaEvGosterge");
+                if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + aktifEvKonumu + " (Hafızada Kayıtlı)";
+                
+                const sehirSelect = document.getElementById("sehir");
+                if(sehirSelect && aktifEvKonumu) {{
+                    sehirSelect.value = aktifEvKonumu;
+                    setTimeout(() => {{ ilceleriGuncelle(); }}, 300);
                 }}
 
+                seyahatListesiDepremDenetle();
                 sesliYonlendirmeButonunuGuncelle();
+                aiRobotAyariniGuncelle();
+
+                setTimeout(function () {{
+                    const splash = document.getElementById("splash-screen");
+                    if (splash) {{
+                        splash.classList.add("fade-out");
+                        setTimeout(function () {{ splash.remove(); }}, 800);
+                    }}
+                }}, 1800);
 
                 setTimeout(() => {{
-                    if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {{
+                    if (aiRobotAktifMi && !girisRehberiEtkilesimleBasladi) {{
                         girisSesliAciklama('auto');
                     }}
                 }}, 900);
 
                 document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-                document.addEventListener('touchstart', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-                document.addEventListener('keydown', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
-
-                const depremAlarmVar = "{deprem_alarm_var}" === "True";
-
-                if (depremAlarmVar) {{
-                    console.log("Genel canlı deprem alarmı mevcut. Konum modu açılırsa yakınlık kontrolü yapılır.");
-                }}
-
-                if (analizYapildi) {{
-                    document.getElementById("landingScreen").style.display = "none";
-                    document.getElementById("mainContent").classList.add("active");
-
-                    setTimeout(() => {{
-                        const sonucAlani = document.getElementById("analizSonucAlani");
-
-                        if (sonucAlani) {{
-                            sonucAlani.scrollIntoView({{
-                                behavior: "smooth",
-                                block: "start"
-                            }});
-
-                            const sonucMetni = sonucAlani.innerText.trim();
-                            const toplanmaGirdisi = parseFloat(document.getElementById("t").value || 0);
-                            const tahminiMesafe = Math.max(100, Math.round(150000 / (toplanmaGirdisi + 1)));
-                            const yonlerListesi = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Batı"];
-                            const uretilenYon = yonlerListesi[Math.floor(Math.random() * yonlerListesi.length)];
-
-                            const yonlendirmeMetni = " En yakın güvenli toplanma alanı tahmini " + tahminiMesafe + " metre " + uretilenYon + " yönündedir.";
-
-                            if (sonucMetni && sesliYonlendirmeAcikMi()) {{
-                                sesliBilgi("Analiz sonucu hazır. " + sonucMetni + yonlendirmeMetni);
-                            }}
-                        }}
-                    }}, 450);
-                }}
             }};
         </script>
 

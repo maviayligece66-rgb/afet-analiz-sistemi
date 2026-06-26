@@ -20,12 +20,12 @@
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 
     <style>
-        #map {
+        #map {{
             height: 420px;
             border-radius: 20px;
-        }
+        }}
 
-        #splash-screen {
+        #splash-screen {{
             position: fixed;
             inset: 0;
             background: #081120;
@@ -34,27 +34,27 @@
             justify-content: center;
             z-index: 99999;
             transition: opacity .8s ease;
-        }
+        }}
 
-        #splash-screen.fade-out {
+        #splash-screen.fade-out {{
             opacity: 0;
             pointer-events: none;
-        }
+        }}
 
-        .splash-image {
+        .splash-image {{
             width: 100%;
             height: 100%;
             object-fit: cover;
-        }
+        }}
         
         /* İşitme engelliler için flaşör efekti */
-        @keyframes flash-red {
-            0%, 100% { background-color: rgba(239, 68, 68, 0.2); }
-            50% { background-color: rgba(239, 68, 68, 0.7); }
-        }
-        .visual-alarm-active {
+        @keyframes flash-red {{
+            0%, 100% {{ background-color: rgba(239, 68, 68, 0.2); }}
+            50% {{ background-color: rgba(239, 68, 68, 0.7); }}
+        }}
+        .visual-alarm-active {{
             animation: flash-red 0.8s infinite;
-        }
+        }}
     </style>
 </head>
 
@@ -72,7 +72,13 @@
             Yapay zekâ destekli şehir risk analizi platformu
         </p>
         
-        <div class="max-w-7xl mx-auto mt-4 flex flex-wrap justify-center gap-3">
+        <div class="max-w-7xl mx-auto mt-4 flex flex-wrap justify-center items-center gap-3">
+            <span id="anaEvBarGosterge" class="bg-slate-950 border border-slate-800 text-xs px-3 py-2 rounded-xl text-blue-400 font-bold">
+                🏠 Ev Konumu: Yükleniyor...
+            </span>
+            <button type="button" id="aiRobotToggleBtn" onclick="aiRobotAyariniDegistir()" class="bg-purple-800 hover:bg-purple-900 px-4 py-2 rounded-xl text-sm font-bold" aria-label="Yapay Zekâ Sesli Asistan Ayarını Değiştir">
+                🤖 Yapay Zekâ Robotu: Açık
+            </button>
             <button type="button" onclick="girisSesliAciklama('manual')" class="bg-teal-600 hover:bg-teal-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1" aria-label="Erişilebilir sesli rehberi başlat">
                 ♿ Sesli Rehber
             </button>
@@ -101,10 +107,13 @@
 
             <div class="space-y-4">
                 <div>
-                    <label for="city" class="block text-sm text-slate-400 mb-1">Şehir Adı</label>
+                    <label for="sehir" class="block text-sm text-slate-400 mb-1">Şehir Seçiniz</label>
                     <div class="flex gap-2">
-                        <input id="city" class="flex-1 p-3 rounded bg-slate-800 border border-slate-700 focus:outline-none focus:border-blue-500 text-white" placeholder="Şehir adı örn: Kayseri">
-                        <button type="button" onclick="sehirTakipListesineEkle()" class="bg-emerald-600 hover:bg-emerald-700 px-3 rounded-xl font-bold text-sm" title="Bu şehri seyahat takip listeme ekle">
+                        <select id="sehir" name="sehir" required onchange="evKonumunuHafizayaAl(this.value); ilceleriGuncelle();" class="flex-1 p-3 rounded bg-slate-800 border border-slate-700 focus:outline-none focus:border-blue-500 text-white">
+                            <option value="">Şehir seçiniz</option>
+                            {sehir_options}
+                        </select>
+                        <button type="button" onclick="sehirTakipListesineEkle()" class="bg-emerald-600 hover:bg-emerald-700 px-3 rounded-xl font-bold text-sm flex items-center gap-1" title="Bu şehri seyahat takip listeme ekle">
                             📍 Takip Et
                         </button>
                     </div>
@@ -113,37 +122,54 @@
                 <div id="takipSehirleriAlani" class="bg-slate-950 p-3 rounded-xl border border-slate-800 hidden">
                     <p class="text-xs text-slate-400 mb-2 font-bold">📍 Seyahat Modu / Takip Edilen Şehirlerim:</p>
                     <div id="takipBadgeleri" class="flex flex-wrap gap-2">
-                        </div>
+                    </div>
                 </div>
 
                 <div>
-                    <label for="buildingAge" class="block text-sm text-slate-400 mb-1">Bina Yaşı</label>
-                    <input id="buildingAge" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Bina yaşı">
+                    <label for="ilce" class="block text-sm text-slate-400 mb-1">İlçe Seçiniz</label>
+                    <select id="ilce" name="ilce" onchange="mahalleleriGuncelle()" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white">
+                        {ilce_options}
+                    </select>
                 </div>
 
                 <div>
-                    <label for="populationDensity" class="block text-sm text-slate-400 mb-1">Nüfus Yoğunluğu</label>
-                    <input id="populationDensity" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Nüfus yoğunluğu">
+                    <label for="mahalle" class="block text-sm text-slate-400 mb-1">Mahalle Seçiniz</label>
+                    <select id="mahalle" name="mahalle" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white">
+                        {mahalle_options}
+                    </select>
                 </div>
 
                 <div>
-                    <label for="pastDisasters" class="block text-sm text-slate-400 mb-1">Geçmiş Afet Sayısı</label>
-                    <input id="pastDisasters" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Geçmiş afet sayısı">
+                    <label for="n" class="block text-sm text-slate-400 mb-1">Yaşadığınız Bölgedeki Tahmini Nüfus Yoğunluğu</label>
+                    <input id="n" type="number" step="any" name="n" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Örn: 5000">
+                    <small class="block text-xs text-slate-400 mt-1">
+                        Bu değer binada yaşayan kişi sayısını değil, bulunduğunuz mahalle veya ilçedeki genel nüfus yoğunluğunu temsil eder.
+                    </small>
                 </div>
 
                 <div>
-                    <label for="hospitalCount" class="block text-sm text-slate-400 mb-1">Hastane Sayısı</label>
-                    <input id="hospitalCount" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Hastane sayısı">
+                    <label for="b" class="block text-sm text-slate-400 mb-1">Bina Yaşı</label>
+                    <input id="b" type="number" step="any" name="b" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Örn: 20">
                 </div>
 
                 <div>
-                    <label for="infrastructureScore" class="block text-sm text-slate-400 mb-1">Altyapı Dayanıklılığı (0-100)</label>
-                    <input id="infrastructureScore" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Altyapı dayanıklılığı 0-100">
+                    <label for="y" class="block text-sm text-slate-400 mb-1">Yatak Kapasitesi</label>
+                    <input id="y" type="number" step="any" name="y" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Örn: 1000">
                 </div>
 
                 <div>
-                    <label for="assemblyAreaCount" class="block text-sm text-slate-400 mb-1">Toplanma Alanı Sayısı</label>
-                    <input id="assemblyAreaCount" type="number" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Toplanma alanı sayısı">
+                    <label for="t" class="block text-sm text-slate-400 mb-1">Toplanma Alanı</label>
+                    <input id="t" type="number" step="any" name="t" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Örn: 50000">
+                </div>
+
+                <div>
+                    <label for="i" class="block text-sm text-slate-400 mb-1">İtfaiye Gücü</label>
+                    <input id="i" type="number" step="any" name="i" class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white" placeholder="Örn: 50">
+                </div>
+
+                <div class="zemin-info-box text-sm p-3 bg-slate-950 border border-slate-800 rounded-xl">
+                    <b>🌍 Zemin Riski:</b><br>
+                    Zemin riski kullanıcıdan istenmez. Seçilen şehir, ilçe ve mahalle bilgisine göre sistem tarafından otomatik değerlendirilir.
                 </div>
 
                 <button onclick="predictRisk()" class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded-xl font-bold transition-colors">
@@ -153,9 +179,9 @@
             </div>
         </section>
 
-        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl flex flex-col justify-between" role="region" aria-labelledby="resultHeading">
+        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
             <div>
-                <h2 id="resultHeading" class="text-2xl font-semibold mb-4">Tahmin Sonucu</h2>
+                <h2 class="text-2xl font-semibold mb-4">Tahmin Sonucu</h2>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="bg-slate-800 p-5 rounded-xl text-center">
@@ -220,7 +246,7 @@
 
         <section class="bg-slate-900 p-6 rounded-2xl shadow-xl lg:col-span-2" role="region" aria-labelledby="mapHeading">
             <h2 id="mapHeading" class="text-2xl font-semibold mb-4">Türkiye Haritası Canlı Risk İzleme</h2>
-            <div id="map" aria-label="Canlı afet risk takip ve analiz haritası"></div>
+            <div id="map" aria-label="Canlı afet risk takip og analiz haritası"></div>
             
             <div class="mt-4 p-4 bg-slate-950 rounded-xl text-xs text-slate-400 space-y-1 border border-slate-800">
                 <p class="font-bold text-slate-300 mb-1">♿ İleri Düzey Erişilebilirlik Paket Özellikleri:</p>
@@ -235,11 +261,11 @@
     <script>
         const map = L.map('map').setView([39.0, 35.0], 6);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
             attribution: '© OpenStreetMap'
-        }).addTo(map);
+        }}).addTo(map);
 
-        const cityCoordinates = {
+        const cityCoordinates = {{
             "İstanbul": [41.0082, 28.9784],
             "Ankara": [39.9334, 32.8597],
             "İzmir": [38.4237, 27.1428],
@@ -248,108 +274,163 @@
             "Hatay": [36.2021, 36.1600],
             "Malatya": [38.3552, 38.3095],
             "Konya": [37.8714, 32.4847]
-        };
+        }};
 
         let marker;
         let seyahatTakipListesi = JSON.parse(localStorage.getItem("riskAtlasTakipSehirleri")) || ["Konya", "Hatay"];
 
+        // KALICI HAFIZA VE SEÇİLEN EV KONUMU AYARLARI
+        let kaliciEvKonumu = localStorage.getItem("riskAtlasAnaEvKonumu") || "Konya";
+        let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
+
+        function aiRobotAyariniGuncelle() {{
+            const btn = document.getElementById("aiRobotToggleBtn");
+            if (!btn) return;
+            if (aiRobotAktifMi) {{
+                btn.textContent = "🤖 Yapay Zekâ Robotu: Açık";
+                btn.className = "bg-purple-800 hover:bg-purple-900 px-4 py-2 rounded-xl text-sm font-bold";
+            }} else {{
+                btn.textContent = "🤖 Yapay Zekâ Robotu: Kapalı";
+                btn.className = "bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm font-bold border border-slate-700";
+                window.speechSynthesis.cancel();
+            }}
+        }}
+
+        function aiRobotAyariniDegistir() {{
+            aiRobotAktifMi = !aiRobotAktifMi;
+            localStorage.setItem("riskAtlasAiRobotAyar", aiRobotAktifMi ? "acik" : "kapali");
+            aiRobotAyariniGuncelle();
+            if (aiRobotAktifMi) {{
+                robotSoruCevapKonus("Yapay zekâ robotu aktif hale getirildi. Size yardımcı olmak için buradayım.");
+            }}
+        }}
+
+        function evKonumunuHafizayaAl(sehirAdi) {{
+            if (!sehirAdi) return;
+            kaliciEvKonumu = sehirAdi;
+            localStorage.setItem("riskAtlasAnaEvKonumu", sehirAdi);
+            
+            const barGosterge = document.getElementById("anaEvBarGosterge");
+            if (barGosterge) barGosterge.textContent = "🏠 Ev Konumu: " + sehirAdi;
+            
+            robotSoruCevapKonus("Ana ev konumunuz " + sehirAdi + " olarak güncellendi ve kalıcı hafızaya alındı.");
+        }}
+
         // ERİŞİLEBİLİRLİK: SES MOTORU AYARLARI
         let girisRehberiEtkilesimleBasladi = false;
-        function sesliYonlendirmeAcikMi() { return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali"; }
+        function sesliYonlendirmeAcikMi() {{ return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali"; }}
 
-        function sesliYonlendirmeButonunuGuncelle() {
+        function sesliYonlendirmeButonunuGuncelle() {{
             const btn = document.getElementById("voiceToggleButton");
             if (!btn) return;
             btn.textContent = sesliYonlendirmeAcikMi() ? "🔊 Sesli Yönlendirme: Açık" : "🔇 Sesli Yönlendirme: Kapalı";
-        }
+        }}
 
-        function sesliYonlendirmeAyariniDegistir() {
-            if (sesliYonlendirmeAcikMi()) {
+        function sesliYonlendirmeAyariniDegistir() {{
+            if (sesliYonlendirmeAcikMi()) {{
                 localStorage.setItem("riskatlasSesliYonlendirme", "kapali");
                 window.speechSynthesis.cancel();
-            } else {
+            }} else {{
                 localStorage.setItem("riskatlasSesliYonlendirme", "acik");
-                setTimeout(() => { girisSesliAciklama('manual'); }, 200);
-            }
+                setTimeout(() => {{ girisSesliAciklama('manual'); }}, 200);
+            }}
             sesliYonlendirmeButonunuGuncelle();
-        }
+        }}
 
-        function sesliBilgiKonus(metin) {
+        function sesliBilgiKonus(metin) {{
             if (!sesliYonlendirmeAcikMi()) return;
-            if ("speechSynthesis" in window) {
+            if ("speechSynthesis" in window) {{
                 const mesaj = new SpeechSynthesisUtterance(metin);
                 mesaj.lang = "tr-TR";
                 mesaj.rate = 0.95;
                 window.speechSynthesis.cancel();
-                setTimeout(() => { window.speechSynthesis.speak(mesaj); }, 150);
-            }
-        }
+                setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
+            }}
+        }}
+
+        // YAPAY ZEKÂ ROBOTU: SESLİ VE ETKİLEŞİMLİ SORU-CEVAP REHBERİ
+        function robotSoruCevapKonus(metin, soruMu = false) {{
+            if (!aiRobotAktifMi) return;
+            if ("speechSynthesis" in window) {{
+                const mesaj = new SpeechSynthesisUtterance(metin);
+                mesaj.lang = "tr-TR";
+                mesaj.rate = 0.93;
+                window.speechSynthesis.cancel();
+                mesaj.onend = function() {{
+                    if (soruMu) {{
+                        console.log("Robot kullanıcıdan sesli yanıt bekliyor...");
+                    }}
+                }};
+                setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
+            }}
+        }}
 
         // GÖRME ENGELLİLER İÇİN ERİŞİLEBİLİR SESLİ REHBER VE ASİSTAN TETİKLEYİCİ
-        function girisSesliAciklama(kaynak) {
-            if (!sesliYonlendirmeAcikMi()) return;
-            if (kaynak === 'manual' || kaynak === 'firstInteraction') {
+        function girisSesliAciklama(kaynak) {{
+            if (!aiRobotAktifMi) return;
+            if (kaynak === 'manual' || kaynak === 'firstInteraction') {{
                 girisRehberiEtkilesimleBasladi = true;
-            }
+            }}
 
-            const metin = "RiskAtlas yapay zekâ destekli afet dirençliliği sistemine hoş geldiniz. " +
-                          "Form alanlarını doldurarak veya eller serbest akıllı asistanı aktif ederek sesli komutlarla analiz yapabilirsiniz. " +
-                          "Seyahat modunda gezdiğiniz şehirleri takip listesine ekleyerek o şehirlerdeki canlı risklerden anında sesli uyarı alabilirsiniz.";
+            const metin = "RiskAtlas interaktif yapay zekâ sesli asistan sistemine hoş geldiniz. " +
+                          "Uygulama hafızası etkindir ve şu andaki kalıcı ev konumunuz " + kaliciEvKonumu + " olarak ayarlanmıştır. " +
+                          "Böylece her girişte form doldurmak zorunda kalmazsınız. " +
+                          "Sesli robotumuz sizi dinlemektedir, bana 'Analiz et' diyebilir veya evinizi değiştirmek için 'Ewimi Ankara yap' şeklinde seslenebilirsiniz. " +
+                          "Başka bir işlem yapmak ister misiniz?";
 
-            if ("speechSynthesis" in window) {
+            if ("speechSynthesis" in window) {{
                 window.speechSynthesis.cancel();
                 const msg = new SpeechSynthesisUtterance(metin);
                 msg.lang = "tr-TR";
-                msg.onend = function() {
-                    // Selamlama bitince akıllı asistan dinlemeyi otomatik aç
+                msg.onend = function() {{
                     otomatikSesliAsistanBaslat();
-                };
+                }};
                 window.speechSynthesis.speak(msg);
-            }
-        }
+            }}
+        }}
 
         // SEYAHAT MODU: ÇOKLU KONUM / ŞEHİR TAKİP YAPISI
-        function sehirTakipListesiniCiz() {
+        function sehirTakipListesiniCiz() {{
             const alan = document.getElementById("takipSehirleriAlani");
             const badgeler = document.getElementById("takipBadgeleri");
-            if(seyahatTakipListesi.length > 0) {
+            if (seyahatTakipListesi.length > 0) {{
                 alan.classList.remove("hidden");
                 badgeler.innerHTML = seyahatTakipListesi.map(s => `
                     <span class="bg-slate-800 text-emerald-400 font-bold px-3 py-1 rounded-lg text-xs border border-emerald-500/30 flex items-center gap-1">
-                        📍 ${s}
-                        <button type="button" onclick="sehirTakipListesindenSil('${s}')" class="text-red-400 hover:text-red-500 font-extrabold ml-1" aria-label="${s} şehrini takip listesinden kaldır">×</button>
+                        📍 ${{s}}
+                        <button type="button" onclick="sehirTakipListesindenSil('${{s}}')" class="text-red-400 hover:text-red-500 font-extrabold ml-1" aria-label="${{s}} şehrini takip listesinden kaldır">×</button>
                     </span>
                 `).join('');
-            } else {
+            }} else {{
                 alan.classList.add("hidden");
-            }
+            }}
             localStorage.setItem("riskAtlasTakipSehirleri", JSON.stringify(seyahatTakipListesi));
-        }
+        }}
 
-        function sehirTakipListesineEkle() {
-            const sehirInput = document.getElementById("city").value.trim();
-            if (!sehirInput) {
-                sesliBilgiKonus("Lütfen takip listesine eklemek için önce bir şehir adı giriniz.");
+        function sehirTakipListesineEkle() {{
+            const sehirSelect = document.getElementById("sehir");
+            if (!sehirSelect || !sehirSelect.value) {{
+                robotSoruCevapKonus("Lütfen takip listesine eklemek için önce listeden bir şehir seçiniz.");
                 return;
-            }
-            const sehirDüzgün = sehirInput.charAt(0).upperCase + sehirInput.slice(1); // Basit capitalize
-            if(!seyahatTakipListesi.includes(sehirInput)) {
+            }}
+            const sehirInput = sehirSelect.value;
+            if (!seyahatTakipListesi.includes(sehirInput)) {{
                 seyahatTakipListesi.push(sehirInput);
                 sehirTakipListesiniCiz();
-                sesliBilgiKonus(`${sehirInput} şehri seyahat takip listenize başarıyla eklendi.`);
-            }
-        }
+                robotSoruCevapKonus(`${{sehirInput}} şehri seyahat takip listenize başarıyla eklendi.`);
+            }}
+        }}
 
-        function sehirTakipListesindenSil(sehir) {
+        function sehirTakipListesindenSil(sehir) {{
             seyahatTakipListesi = seyahatTakipListesi.filter(s => s !== sehir);
             sehirTakipListesiniCiz();
-            sesliBilgiKonus(`${sehir} şehri takip listenizden kaldırıldı.`);
-        }
+            robotSoruCevapKonus(`${{sehir}} şehri takip listenizden kaldırıldı.`);
+        }}
 
         // SEYAHAT SİMÜLASYONU: ARKA PLANDA ÇOKLU ŞEHİR DEPREM KONTROLÜ
         function seyahatSehirDepremKontrol(sehir, buyukluk) {
-            if(seyahatTakipListesi.includes(sehir) && buyukluk >= 4.5) {
-                const alarmMetni = `Dikkat! Takip listenizdeki ${sehir}'de ${buyukluk} büyüklüğünde kritik deprem risk uyarısı algılandı! Güvenli yerlere geçin!`;
+            if (seyahatTakipListesi.includes(sehir) && buyukluk >= 4.5) {{
+                const alarmMetni = `Dikkat! Seyahat listenizdeki ${{sehir}}'de ${{buyukluk}} büyüklüğünde kritik deprem tespit edildi! Lütfen güvenli yerlere geçin!`;
                 
                 document.getElementById("emergencyAlertText").innerText = alarmMetni;
                 const alertBox = document.getElementById("emergencyAlert");
@@ -357,80 +438,92 @@
                 document.getElementById("mainBody").classList.add("visual-alarm-active");
 
                 // İŞİTME ENGELLİLER İÇİN SÜREKLİ RİTMİK TİTREŞİM (Vibration API)
-                if (navigator.vibrate) {
+                if (navigator.vibrate) {{
                     navigator.vibrate([400, 200, 400, 200, 800, 400, 400]);
-                }
+                }}
                 
-                // GÖRME ENGELLİLER İÇİN DINAMİK YÖNLÜ ACİL SES ÇIKIŞI
-                sesliBilgiKonus(alarmMetni);
-            }
+                // GÖRME ENGELLİLER İÇİN DINAMİK YÖNLÜ ACİL SES TEPKİSİ
+                robotSoruCevapKonus(alarmMetni);
+            }}
         }
 
-        function acilDurumKapat() {
+        function acilDurumKapat() {{
             document.getElementById("emergencyAlert").classList.add("hidden");
             document.getElementById("mainBody").classList.remove("visual-alarm-active");
             if (navigator.vibrate) navigator.vibrate(0);
             window.speechSynthesis.cancel();
-        }
+        }}
 
-        // GÖRME ENGELLİLER: SESLİ KOMUT KILAVUZU (SPEECH-TO-TEXT NAVİGASYON)
-        let recognition;
-        function otomatikSesliAsistanBaslat() {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        // INTERAKTİF SESLİ ASİSTAN: SÜREKLİ DİNLEME VE SESLE AKTİVASYON MOTORU
+        function otomatikSesliAsistanBaslat() {{
+            if (!aiRobotAktifMi) return;
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                 console.log("Tarayıcı ses tanıma desteklemiyor.");
                 return;
-            }
+            }}
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.continuous = true;
             recognition.interimResults = false;
             recognition.lang = 'tr-TR';
 
-            recognition.onstart = function() {
+            recognition.onstart = function() {{
                 document.getElementById("speechAsistanBtn").className = "bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1";
                 document.getElementById("speechAsistanBtn").textContent = "🎙️ Akıllı Asistan: Dinliyor";
-            };
+            }};
 
-            recognition.onresult = function(event) {
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
+            recognition.onresult = function(event) {{
+                for (let i = event.resultIndex; i < event.results.length; ++i) {{
+                    if (event.results[i].isFinal) {{
                         let komut = event.results[i][0].transcript.trim().toLowerCase();
-                        console.log("Algılanan Sesli Komut:", komut);
+                        console.log("Yapay Zekâ Ses Motoru Yakaladı:", komut);
 
-                        if (komut.includes("analiz et") || komut.includes("analizi yap")) {
+                        if (komut.includes("analiz et") || komut.includes("analizi yap") || komut.includes("hesapla")) {{
                             predictRisk();
-                        } else if (komut.includes("kapat") || komut.includes("alarmı sustur")) {
+                        }} else if (komut.includes("kapat") || komut.includes("sustur") || komut.includes("alarmı kapat")) {{
                             acilDurumKapat();
-                        } else if (komut.includes("şehir") || komut.includes("konum")) {
-                            let parcalar = komut.split("şehir");
-                            if(parcalar.length > 1 && parcalar[1].trim()) {
-                                document.getElementById("city").value = parcalar[1].trim();
-                                sesliBilgiKonus("Şehir alanı sesli olarak güncellendi: " + parcalar[1].trim());
-                            }
-                        }
-                    }
-                }
-            };
+                        }} else if (komut.includes("evimi") || komut.includes("konumumu")) {{
+                            let sehirBul = komut.replace("evimi", "").replace("konumumu", "").replace("yap", "").replace("şehir", "").trim();
+                            if (sehirBul) {{
+                                let sehirDüzgün = sehirBul.charAt(0).toUpperCase() + sehirBul.slice(1);
+                                const sehirSelect = document.getElementById("sehir");
+                                if (sehirSelect) {{
+                                    for (let option of sehirSelect.options) {{
+                                        if (option.value.toLowerCase() === sehirBul) {{
+                                            sehirSelect.value = option.value;
+                                            evKonumunuHafizayaAl(option.value);
+                                            ilceleriGuncelle();
+                                            break;
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }} else if (komut.includes("yardım") || komut.includes("neredeyim")) {{
+                            robotSoruCevapKonus("Şu anda ana ekrandasınız. Kayıtlı ana konumunuz " + kaliciEvKonumu + " olarak çalışmaktadır. Başka bir şey sormak ister misiniz?", true);
+                        }}
+                    }}
+                }}
+            }};
 
-            recognition.onend = function() {
+            recognition.onend = function() {{
                 document.getElementById("speechAsistanBtn").className = "bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1";
                 document.getElementById("speechAsistanBtn").textContent = "🎙️ Akıllı Asistan: Kapalı";
-                if (sesliYonlendirmeAcikMi()) try { recognition.start(); } catch(e){}
-            };
+                if (aiRobotAktifMi) try {{ recognition.start(); }} catch(e){{}}
+            }};
 
-            try { recognition.start(); } catch(e){}
+            try {{ recognition.start(); }} catch(e){{}}
         }
 
         // RISK TAHMİN FONKSİYONU VE ERİŞİLEBİLİRLİK ENTEGRASYONU
-        function predictRisk() {
-            const city = document.getElementById("city").value || "Kayseri";
+        function predictRisk() {{
+            const city = document.getElementById("sehir").value || "Kayseri";
 
-            const buildingAge = Number(document.getElementById("buildingAge").value);
-            const populationDensity = Number(document.getElementById("populationDensity").value);
-            const pastDisasters = Number(document.getElementById("pastDisasters").value);
-            const hospitalCount = Number(document.getElementById("hospitalCount").value);
-            const infrastructureScore = Number(document.getElementById("infrastructureScore").value);
-            const assemblyAreaCount = Number(document.getElementById("assemblyAreaCount").value);
+            const buildingAge = Number(document.getElementById("b").value);
+            const populationDensity = Number(document.getElementById("n").value);
+            const pastDisasters = Number(document.getElementById("pastDisasters") ? document.getElementById("pastDisasters").value : 0);
+            const hospitalCount = Number(document.getElementById("y").value);
+            const infrastructureScore = Number(document.getElementById("infrastructureScore") ? document.getElementById("infrastructureScore").value : 50);
+            const assemblyAreaCount = Number(document.getElementById("t").value);
 
             let riskScore =
                 buildingAge * 0.8 +
@@ -454,21 +547,21 @@
             let yonler = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Batı"];
             let rastgeleYon = yonler[Math.floor(Math.random() * yonler.length)];
 
-            if (riskScore < 35) {
+            if (riskScore < 35) {{
                 riskLevel = "Düşük";
                 safetyClass = "Güvenli";
                 color = "bg-green-500";
                 universalIcon = "🟢";
                 universalText = "Güvenli Durum";
                 recommendation = `Şehir genel olarak düşük riskli görünüyor. Mevcut altyapı korunmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
-            } else if (riskScore < 70) {
+            }} else if (riskScore < 70) {{
                 riskLevel = "Orta";
                 safetyClass = "Dikkatli Bölge";
                 color = "bg-yellow-500";
                 universalIcon = "🟡";
                 universalText = "Orta Risk / Dikkat";
                 recommendation = `Orta risk tespit edildi. Toplanma alanları ve bina dayanıklılığı artırılmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
-            } else {
+            }} else {{
                 riskLevel = "Yüksek";
                 safetyClass = "Güvensiz";
                 color = "bg-red-500";
@@ -476,9 +569,8 @@
                 universalText = "Yüksek Tehlike / Güvensiz Bölge";
                 recommendation = `Yüksek risk tespit edildi! Acil kentsel önlemler alınmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
                 
-                // İşitme engelliler için hafif titreşim uyarısı analizi
                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-            }
+            }}
 
             const resilienceScore = 100 - riskScore;
 
@@ -489,89 +581,93 @@
 
             // ZİHİNSEL/ÖĞRENME GÜÇLÜĞÜ PANEL GÜNCELLEMESİ
             const iconBox = document.getElementById("universalIconBox");
-            iconBox.classList.remove("hidden");
-            document.getElementById("universalIcon").innerText = universalIcon;
-            document.getElementById("universalIconText").innerText = universalText;
+            if (iconBox) {{
+                iconBox.classList.remove("hidden");
+                document.getElementById("universalIcon").innerText = universalIcon;
+                document.getElementById("universalIconText").innerText = universalText;
+            }}
 
             const riskBar = document.getElementById("riskBar");
             riskBar.style.width = riskScore + "%";
             riskBar.innerText = riskScore + "%";
             riskBar.className = "h-6 rounded-full text-center text-sm " + color;
 
-            // Veritabanı geçmiş tablosuna simüle veya dinamik satır ekle
-            const yeniSatir = `<tr class="border-b border-slate-800 hover:bg-slate-900">
-                <td class="p-3 font-semibold">${city}</td>
-                <td class="p-3">${buildingAge || '-'}</td>
-                <td class="p-3 text-slate-300">${riskLevel}</td>
-                <td class="p-3 text-xs text-slate-500">Şimdi</td>
-            </tr>`;
-            document.getElementById("dbHistoryTableBody").innerHTML = yeniSatir + document.getElementById("dbHistoryTableBody").innerHTML;
-
-            // GÖRME ENGELLİ BİREYLER İÇİN ANALİZ SONUCUNUN ANINDA SESLENDİRİLMESİ
-            sesliBilgiKonus(`Analiz tamamlandı. ${city} şehri risk seviyesi ${riskLevel}. Sınıflandırma ${safetyClass}. Dayanıklılık puanı yüzde ${resilienceScore}. Öneri: ${recommendation}`);
+            // GÖRME ENGELLİ BİREYLER İÇİN ANALİZ SONUCUNUN ANINDA ROBOT TARAFINDAN SESLENDİRİLMESİ
+            robotSoruCevapKonus(`Analiz tamamlandı. Seçilen bölge risk seviyesi ${riskLevel}. Sınıflandırma ${safetyClass}. Dayanıklılık puanı yüzde ${resilienceScore}. Öneri ve yön bulma mesajı: ${recommendation}`);
 
             showCityOnMap(city, riskScore, riskLevel);
-        }
+        }}
 
-        function showCityOnMap(city, riskScore, riskLevel) {
+        function showCityOnMap(city, riskScore, riskLevel) {{
             const coords = cityCoordinates[city] || cityCoordinates["Kayseri"];
 
-            if (marker) {
+            if (marker) {{
                 map.removeLayer(marker);
             }
 
             let circleColor = "green";
 
-            if (riskScore >= 35 && riskScore < 70) {
+            if (riskScore >= 35 && riskScore < 70) {{
                 circleColor = "orange";
-            } else if (riskScore >= 70) {
+            }} else if (riskScore >= 70) {{
                 circleColor = "red";
-            }
+            }}
 
-            marker = L.circle(coords, {
+            marker = L.circle(coords, {{
                 color: circleColor,
                 fillColor: circleColor,
                 fillOpacity: 0.5,
                 radius: 50000
-            }).addTo(map);
+            }}).addTo(map);
 
             marker.bindPopup(`
-                <b>${city}</b><br>
-                Risk Seviyesi: ${riskLevel}<br>
-                Risk Puanı: ${riskScore}
+                <b>\${city}</b><br>
+                Risk Seviyesi: \${riskLevel}<br>
+                Risk Puanı: \${riskScore}
             `).openPopup();
 
             map.setView(coords, 8);
-        }
+        }}
     </script>
 
     <script>
-        window.addEventListener("load", function () {
+        window.addEventListener("load", function () {{
+            // Hafızadaki kalıcı ev konumunu üst barda ve formda otomatik başlat
+            const barGosterge = document.getElementById("anaEvBarGosterge");
+            if (barGosterge) barGosterge.textContent = "🏠 Ev Konumu: " + kaliciEvKonumu;
+            
+            const sehirSelect = document.getElementById("sehir");
+            if (sehirSelect && kaliciEvKonumu) {{
+                sehirSelect.value = kaliciEvKonumu;
+                setTimeout(() => {{ ilceleriGuncelle(); }}, 400);
+            }}
+
             sehirTakipListesiniCiz();
             sesliYonlendirmeButonunuGuncelle();
+            aiRobotAyariniGuncelle();
 
-            setTimeout(function () {
+            setTimeout(function () {{
                 const splash = document.getElementById("splash-screen");
-                if (splash) {
+                if (splash) {{
                     splash.classList.add("fade-out");
-                    setTimeout(function () { splash.remove(); }, 800);
-                }
-            }, 1800);
+                    setTimeout(function () {{ splash.remove(); }}, 800);
+                }}
+            }}, 1800);
 
-            // İlk etkileşimle ses tetiklemesi
-            setTimeout(() => {
-                if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {
+            // İlk etkileşimle yapay zekâ sesli robotunu tetikleme
+            setTimeout(() => {{
+                if (aiRobotAktifMi && !girisRehberiEtkilesimleBasladi) {{
                     girisSesliAciklama('auto');
-                }
-            }, 2500);
+                }}
+            }}, 2500);
 
-            // Seyahat takip modu simülasyon testi (Örnek: Hatay'da 5.3 büyüklüğünde deprem olursa)
-            setTimeout(() => {
+            // Canlı seyahat modu deprem simülasyon test kontrolü
+            setTimeout(() => {{
                 seyahatSehirDepremKontrol("Hatay", 5.3);
-            }, 15000);
+            }}, 16000);
 
-            document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, { once: true });
-        });
+            document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, {{ once: true }});
+        }});
     </script>
 
 </body>

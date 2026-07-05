@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Profil{% endblock %}
+
+{% block content %}
+
+<div class="profile-container">
+
+<h1>Profilim</h1>
+
+<div class="profile-card">
+
+<p><strong>Ad Soyad:</strong> {{ user.fullname }}</p>
+
+<p><strong>E-Posta:</strong> {{ user.email }}</p>
+
+<p><strong>Ev Şehri:</strong> {{ user.home_city }}</p>
+
+<a href="/logout">
+
+Çıkış Yap
+
+</a>
+
+</div>
+
+</div>
+
+{% endblock %}

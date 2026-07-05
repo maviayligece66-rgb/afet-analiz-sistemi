@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>{% block title %}RiskAtlas{% endblock %}</title>
+
+    <!-- Meta -->
+    <meta name="description"
+        content="RiskAtlas - Yapay Zekâ Destekli Deprem Analiz ve Erken Uyarı Sistemi">
+
+    <meta name="theme-color" content="#111827">
+
+    <!-- Favicon -->
+    <link rel="icon"
+        href="{{ url_for('static', filename='icon.png') }}">
+
+    <!-- PWA -->
+    <link rel="manifest"
+        href="{{ url_for('static', filename='manifest.json') }}">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+    <!-- Ortak CSS -->
+    <link rel="stylesheet"
+        href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Sayfaya Özel CSS -->
+    {% block page_css %}
+    {% endblock %}
+
+</head>
+
+<body>
+
+    {% block content %}
+    {% endblock %}
+
+    <!-- Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Ortak JavaScript -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- Sayfaya Özel JavaScript -->
+    {% block page_js %}
+    {% endblock %}
+
+</body>
+
+</html>

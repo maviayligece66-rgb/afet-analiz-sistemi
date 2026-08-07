@@ -1,0 +1,511 @@
+/* ==========================================================================
+   RiskAtlas V2 - Professional Stylesheet (login.css)
+   Mevcut Görünüm ve Renk Paleti %100 Korunmuştur.
+   ========================================================================== */
+
+/* Root Variables */
+:root {
+    /* Color Palette */
+    --color-bg-main: #0b1220;
+    --color-bg-card: #141d31;
+    --color-bg-input: #253047;
+    --color-text-main: #ffffff;
+    --color-text-muted: #bfc8dc;
+
+    /* Brand & State Colors */
+    --color-primary: #14b8a6;
+    --color-primary-hover: #0d9488;
+    --color-focus-border: #2ec4b6;
+    --color-accent-voice: #7c3aed;
+    --color-accent-voice-hover: #6d28d9;
+    --color-link: #4ade80;
+    --color-link-hover: color-mix(in srgb, var(--color-link) 80%, #ffffff);
+
+    /* Alert & Status Colors (Production Layer) */
+    --color-danger-bg: #991b1b;
+    --color-danger-border: #b91c1c;
+    --color-warning-bg: #7c2d12;
+    --color-warning-border: #9a3412;
+    --color-success-bg: #065f46;
+    --color-success-border: #047857;
+    --color-info-bg: #1e3a8a;
+    --color-info-border: #1d4ed8;
+
+    /* Spacing & Layout */
+    --spacing-xs: 6px;
+    --spacing-sm: 8px;
+    --spacing-md: 10px;
+    --spacing-lg: 12px;
+    --spacing-xl: 14px;
+    --spacing-2xl: 15px;
+    --spacing-3xl: 20px;
+    --spacing-4xl: 30px;
+    --spacing-5xl: 40px;
+
+    /* Border Radii */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
+    --radius-2xl: 20px;
+
+    /* Typography */
+    --font-family: Arial, Helvetica, sans-serif;
+    --font-size-h1: clamp(1.75rem, 5vw, 2rem);
+    --font-size-body: 16px;
+    --font-size-input: 16px;
+    --font-size-btn: 18px;
+    --font-size-voice: 17px;
+    --font-size-small: 14px;
+    --font-weight-bold: bold;
+
+    /* Effects & Transitions */
+    --shadow-card: 0 15px 35px rgba(0, 0, 0, 0.35);
+    --transition-default: 0.3s ease;
+    --transition-fast: 0.2s ease;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--color-bg-main);
+    font-family: var(--font-family);
+    color: var(--color-text-main);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Layout */
+.login-container {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: var(--spacing-4xl);
+}
+
+/* Login Card */
+.login-card {
+    width: 100%;
+    max-width: 500px;
+    background: var(--color-bg-card);
+    border-radius: var(--radius-2xl);
+    padding: var(--spacing-5xl);
+    box-shadow: var(--shadow-card);
+    text-align: center;
+}
+
+/* Logo */
+.login-logo {
+    width: 120px;
+    margin-bottom: var(--spacing-3xl);
+    aspect-ratio: 1 / 1;
+}
+
+/* Typography */
+.login-card h1 {
+    font-size: var(--font-size-h1);
+    margin-bottom: var(--spacing-md);
+}
+
+.login-card .subtitle {
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-4xl);
+    font-size: var(--font-size-body);
+}
+
+.divider {
+    margin: var(--spacing-3xl) 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+}
+
+/* Forms */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: var(--spacing-3xl);
+    text-align: left;
+}
+
+.form-group label {
+    margin-bottom: var(--spacing-sm);
+    font-weight: var(--font-weight-bold);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.form-group input {
+    width: 100%;
+    padding: var(--spacing-xl);
+    border: 2px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-input);
+    color: var(--color-text-main);
+    font-size: var(--font-size-input);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+/* Input Gelişmiş Durum Yönetimi */
+.form-group input:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-bg-input) 92%, #ffffff);
+}
+
+.form-group input:focus,
+.form-group input:focus-visible {
+    outline: none;
+    border-color: var(--color-focus-border);
+    background: var(--color-bg-input);
+}
+
+.form-group input:invalid {
+    box-shadow: none;
+}
+
+.form-group input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.form-group input::placeholder {
+    color: color-mix(in srgb, var(--color-text-muted) 50%, transparent);
+}
+
+/* Tarayıcı Autofill Desteği */
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--color-text-main);
+    -webkit-box-shadow: 0 0 0px 1000px var(--color-bg-input) inset;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Beni Hatırla Satırı */
+.remember-row {
+    display: flex;
+    align-items: center;
+    text-align: left;
+    margin-bottom: var(--spacing-3xl);
+}
+
+.remember-row label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-text-muted);
+    font-size: calc(var(--font-size-body) - 1px);
+}
+
+.remember-row input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: var(--color-primary);
+    width: 16px;
+    height: 16px;
+}
+
+/* Password */
+.password-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.password-wrapper input {
+    padding-right: 48px;
+}
+
+.toggle-password-btn {
+    position: absolute;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    font-size: var(--font-size-body);
+    transition: color var(--transition-fast);
+}
+
+.toggle-password-btn:hover {
+    color: var(--color-link);
+}
+
+/* Buttons & Links Grouping (DRY Prensibi) */
+.btn-login,
+#voiceLogin,
+.register-link,
+.guest-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    text-decoration: none;
+    box-sizing: border-box;
+}
+
+.btn-login,
+#voiceLogin {
+    width: 100%;
+    border: none;
+    cursor: pointer;
+}
+
+.btn-login {
+    padding: var(--spacing-2xl);
+    border-radius: var(--radius-xl);
+    background: var(--color-primary);
+    color: var(--color-text-main);
+    font-size: var(--font-size-btn);
+    transition: background-color var(--transition-default), opacity var(--transition-default);
+}
+
+.btn-login:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.btn-login:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Links Routing Area */
+.register-link {
+    margin-top: var(--spacing-3xl);
+    color: var(--color-link);
+    transition: color var(--transition-fast);
+}
+
+.register-link:hover {
+    color: var(--color-link-hover);
+}
+
+/* Alerts */
+.flash-messages-wrapper {
+    margin-bottom: var(--spacing-3xl);
+}
+
+.alert,
+.js-error-summary {
+    padding: var(--spacing-lg) var(--spacing-xl);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-small);
+    text-align: left;
+    margin-bottom: var(--spacing-md);
+    color: var(--color-text-main);
+    line-height: 1.5;
+}
+
+.alert.danger,
+.alert.error {
+    background-color: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+}
+
+.alert.success {
+    background-color: var(--color-success-bg);
+    border: 1px solid var(--color-success-border);
+}
+
+.alert.warning {
+    background-color: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+}
+
+.alert.info {
+    background-color: var(--color-info-bg);
+    border: 1px solid var(--color-info-border);
+}
+
+/* JS Error Summary */
+.js-error-summary {
+    display: none;
+    background-color: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    margin-bottom: var(--spacing-3xl);
+}
+
+.js-error-summary.visible {
+    display: block;
+}
+
+/* Caps Lock Warning Element */
+.caps-lock-warning {
+    display: none;
+    color: var(--color-text-main);
+    background-color: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    padding: var(--spacing-md) var(--spacing-xl);
+    margin-top: var(--spacing-sm);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-small);
+    align-items: center;
+    gap: var(--spacing-sm);
+    opacity: 0;
+    transform: translateY(-5px);
+    transition: opacity var(--transition-default), transform var(--transition-default);
+}
+
+.caps-lock-warning.visible {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Guest Area */
+.guest-area {
+    margin-top: var(--spacing-md);
+}
+
+.guest-link {
+    color: var(--color-link);
+    transition: color var(--transition-fast);
+}
+
+.guest-link:hover {
+    color: var(--color-link-hover);
+}
+
+/* Voice Button */
+#voiceLogin {
+    margin-top: var(--spacing-3xl);
+    padding: var(--spacing-2xl);
+    border-radius: var(--radius-xl);
+    background: var(--color-accent-voice);
+    color: var(--color-text-main);
+    font-size: var(--font-size-voice);
+    transition: background-color var(--transition-default);
+}
+
+#voiceLogin:hover {
+    background: var(--color-accent-voice-hover);
+}
+
+/* Responsive Constraints */
+@media (max-width: 1200px) {
+    .login-card {
+        max-width: 480px;
+    }
+}
+
+@media (max-width: 992px) {
+    .login-card {
+        max-width: 450px;
+    }
+}
+
+@media (max-width: 768px) {
+    .login-container {
+        padding: var(--spacing-4xl) var(--spacing-3xl);
+    }
+
+    .login-card {
+        padding: var(--spacing-4xl) var(--spacing-3xl);
+    }
+}
+
+@media (max-width: 576px) {
+    .login-card {
+        border-radius: var(--radius-xl);
+        padding: var(--spacing-3xl) var(--spacing-2xl);
+    }
+}
+
+@media (max-width: 480px) {
+    .form-group input {
+        padding: var(--spacing-lg);
+    }
+
+    .btn-login,
+    #voiceLogin {
+        padding: var(--spacing-xl);
+    }
+}
+
+@media (max-width: 360px) {
+    .login-card h1 {
+        font-size: 1.5rem;
+    }
+
+    .login-logo {
+        width: 100px;
+    }
+}
+
+/* Accessibility */
+.btn-login:focus-visible,
+#voiceLogin:focus-visible,
+.toggle-password-btn:focus-visible {
+    outline: 2px solid var(--color-focus-border);
+    outline-offset: 2px;
+}
+
+.register-link:focus-visible,
+.guest-link:focus-visible {
+    outline: 2px dashed var(--color-focus-border);
+    outline-offset: 4px;
+    border-radius: var(--radius-sm);
+}
+
+@media (forced-colors: active) {
+
+    .form-group input,
+    .btn-login,
+    #voiceLogin {
+        border: 2px solid ButtonText;
+    }
+}
+
+/* Animations */
+.spinner-inline {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinLoginSpinner 0.75s linear infinite;
+    vertical-align: text-bottom;
+}
+
+@keyframes spinLoginSpinner {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    ::before,
+    ::after {
+        animation-delay: -1ms !important;
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        background-attachment: scroll !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+    }
+
+    .spinner-inline {
+        animation: none;
+        border-right-color: currentColor;
+    }
+}

@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Ayarlar | RiskAtlas{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet"
+href="{{ url_for('static', filename='css/settings.css') }}">
+{% endblock %}
+
+{% block content %}
+
+<div class="settings-container">
+
+    <h2>⚙️ Ayarlar</h2>
+
+    <!-- ATLAS -->
+
+    <div class="settings-card">
+
+        <h3>🤖 Atlas Sesli Asistan</h3>
+
+        <div class="setting-item">
+
+            <span>Sesli Asistan</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="voiceAssistant"
+                    {% if settings.voice_assistant %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <p class="description">
+
+            Atlas uygulamayı sesli olarak kullanmanıza yardımcı olur.
+
+        </p>
+
+        <div class="setting-item">
+
+            <span>Sesli Giriş</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="voiceLogin"
+                    {% if settings.voice_login %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>Sesli Analiz</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="voiceAnalysis"
+                    {% if settings.voice_analysis %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+    </div>
+
+    <!-- ERİŞİLEBİLİRLİK -->
+
+    <div class="settings-card">
+
+        <h3>♿ Erişilebilirlik</h3>
+
+        <div class="setting-item">
+
+            <span>Görme Engelli Modu</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="blindMode"
+                    {% if settings.blind_mode %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>İşitme Engelli Modu</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="hearingMode"
+                    {% if settings.hearing_mode %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>Büyük Yazılar</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="largeText"
+                    {% if settings.large_text %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>Yüksek Kontrast</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="contrastMode"
+                    {% if settings.high_contrast %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+    </div>
+
+    <!-- DEPREM UYARILARI -->
+
+    <div class="settings-card">
+
+        <h3>🚨 Deprem Uyarıları</h3>
+
+        <div class="setting-item">
+
+            <span>Sesli Alarm</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="soundAlarm"
+                    {% if settings.sound_alarm %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>Titreşim</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="vibration"
+                    {% if settings.vibration %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <span>Flaş ile Uyarı</span>
+
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    id="flashAlert"
+                    {% if settings.flash_alert %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+    </div>
+
+    <!-- GİZLİLİK -->
+
+    <div class="settings-card">
+
+        <h3>🔒 Gizlilik</h3>
+
+        <p>
+
+            Atlas hiçbir konuşmayı kaydetmez.
+
+            Sesli komutlar yalnızca kullanıcı izin verdiğinde çalışır.
+
+        </p>
+
+    </div>
+
+    <!-- KAYDET -->
+
+    <button
+        class="save-btn"
+        id="saveSettings">
+
+        Ayarları Kaydet
+
+    </button>
+
+</div>
+
+{% endblock %}
+
+{% block page_js %}
+
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+
+{% endblock %}

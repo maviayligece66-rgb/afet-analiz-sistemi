@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Kayıt Ol | RiskAtlas{% endblock %}
+
+{% block content %}
+
+<div class="login-container">
+
+    <div class="login-card">
+
+        <img src="{{ url_for('static', filename='icons/icon-192.png') }}" class="login-logo">
+
+        <h1>RiskAtlas</h1>
+
+        <p>Yeni Hesap Oluştur</p>
+
+        <form method="POST" action="/register">
+
+            <input
+                type="text"
+                name="fullname"
+                placeholder="Ad Soyad"
+                required>
+
+            <input
+                type="email"
+                name="email"
+                placeholder="E-posta"
+                required>
+
+            <input
+                type="password"
+                name="password"
+                placeholder="Şifre"
+                required>
+
+            <input
+                type="text"
+                name="home_city"
+                placeholder="Yaşadığınız Şehir"
+                required>
+
+            <button class="btn-login">
+
+                Hesap Oluştur
+
+            </button>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

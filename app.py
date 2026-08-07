@@ -1,103 +1,203 @@
-from flask import Flask, request, make_response, redirect, url_for
-import pandas as pd
-import joblib
-import os
-import folium
-import requests
 import json
-import unicodedata
+import logging
+import os
 import sqlite3
-from datetime import datetime
+import threading
 import time
+import unicodedata
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import folium
+import joblib
+import pandas as pd
+import requests
+from flask import Flask, make_response, redirect, render_template, request, url_for
+
+
+# -----------------------------------------------------------------------------
+# 1. FLASK / LOGGING / CONFIGURATION
+# -----------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENVIRONMENT = os.environ.get("FLASK_ENV", "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("RiskAtlas")
 
 app = Flask(__name__)
 
-base = os.path.dirname(os.path.abspath(__file__))
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    # Existing local development installations must continue to start even if
+    # an environment variable has not yet been configured. Production should
+    # always provide a persistent, private SECRET_KEY.
+    _secret_key = "riskatlas-development-key-change-me"
+    logger.warning("SECRET_KEY ortam değişkeni tanımlı değil; geliştirme anahtarı kullanılıyor.")
 
-data_yolu = os.path.join(base, 'datasets', 'processed_afet_verisi.csv')
-db_yolu = os.path.join(base, 'datasets', 'afet_veritabani.db')
-model_yolu = os.path.join(base, 'models', 'afet_model.pkl')
-geojson_yolu = os.path.join(base, 'datasets', 'turkey_provinces.geojson')
-ilce_yolu = os.path.join(base, 'datasets', 'turkey_districts.csv')
-zemin_yolu = os.path.join(base, 'datasets', 'zemin_verileri.csv')
+app.config.update(
+    SECRET_KEY=_secret_key,
+    PERMANENT_SESSION_LIFETIME=int(os.environ.get("SESSION_LIFETIME", "1800")),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=(
+        os.environ.get("SESSION_COOKIE_SECURE", "1" if IS_PRODUCTION else "0") == "1"
+    ),
+    MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024))),
+)
+
+DATA_PATHS = {
+    "processed_afet": os.path.join(BASE_DIR, "datasets", "processed_afet_verisi.csv"),
+    "db": os.path.join(BASE_DIR, "datasets", "afet_veritabani.db"),
+    "model": os.path.join(BASE_DIR, "models", "afet_model.pkl"),
+    "geojson": os.path.join(BASE_DIR, "datasets", "turkey_provinces.geojson"),
+    "ilce": os.path.join(BASE_DIR, "datasets", "turkey_districts.csv"),
+    "zemin": os.path.join(BASE_DIR, "datasets", "zemin_verileri.csv"),
+}
+
+# Eski değişken adları, dosyanın ilerleyen bölümlerindeki mevcut kodu bozmamak
+# için korunuyor.
+base = BASE_DIR
+data_yolu = DATA_PATHS["processed_afet"]
+db_yolu = DATA_PATHS["db"]
+model_yolu = DATA_PATHS["model"]
+geojson_yolu = DATA_PATHS["geojson"]
+ilce_yolu = DATA_PATHS["ilce"]
+zemin_yolu = DATA_PATHS["zemin"]
 
 
-# SQLite veritabanı, kalıcı ev konumu, analiz kayıt ve seyahat takip tabloları otomatik oluşturulur.
-def veritabani_olustur():
+# -----------------------------------------------------------------------------
+# 2. HTTP / DATABASE HELPERS
+# -----------------------------------------------------------------------------
+HTTP_TIMEOUT = (
+    float(os.environ.get("HTTP_CONNECT_TIMEOUT", "3.05")),
+    float(os.environ.get("HTTP_READ_TIMEOUT", "5.0")),
+)
+HTTP_RETRIES = max(0, int(os.environ.get("HTTP_RETRIES", "1")))
+
+
+@contextmanager
+def get_db_connection() -> Iterator[sqlite3.Connection]:
+    """SQLite bağlantısını güvenli şekilde açar ve işlem sonunda kapatır."""
+    os.makedirs(os.path.dirname(db_yolu), exist_ok=True)
+    conn = sqlite3.connect(db_yolu, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+
     try:
-        os.makedirs(os.path.dirname(db_yolu), exist_ok=True)
-
-        conn = sqlite3.connect(db_yolu)
-        cursor = conn.cursor()
-
-        # Kayıt Tablosu
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS analiz_kayitlari (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sehir TEXT,
-                ilce TEXT,
-                mahalle TEXT,
-                risk_sonucu TEXT,
-                risk_skoru INTEGER,
-                zemin_riski REAL,
-                tarih TEXT
-            )
-        """)
-        
-        # SEYAHAT MODU: Çoklu Şehir Takip Listesi Tablosu
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS takip_edilen_sehirler (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sehir TEXT UNIQUE
-            )
-        """)
-        
-        # SQLite Performans İndeksi Entegrasyonu
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir);")
-
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 10000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         conn.close()
-        print("Veritabanı hazır: analiz_kayitlari ve takip_edilen_sehirler tablosu kontrol edildi, indeks eklendi.")
 
-    except Exception as e:
-        print("Veritabanı oluşturma hatası:", e)
+
+def _http_get_json(url: str, *, timeout: Tuple[float, float] = HTTP_TIMEOUT) -> Any:
+    """JSON döndüren dış API çağrılarını timeout ve sınırlı retry ile yürütür."""
+    last_error: Optional[Exception] = None
+
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            response = requests.get(
+                url,
+                timeout=timeout,
+                headers={"Accept": "application/json", "User-Agent": "RiskAtlas/2.0"},
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            if attempt < HTTP_RETRIES:
+                time.sleep(0.25 * (attempt + 1))
+
+    if last_error:
+        raise last_error
+    return None
+
+
+# -----------------------------------------------------------------------------
+# 3. DATABASE INITIALIZATION
+# -----------------------------------------------------------------------------
+def veritabani_olustur() -> None:
+    """Gerekli SQLite tablolarını ve indekslerini oluşturur."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analiz_kayitlari (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sehir TEXT,
+                    ilce TEXT,
+                    mahalle TEXT,
+                    risk_sonucu TEXT,
+                    risk_skoru INTEGER,
+                    zemin_riski REAL,
+                    tarih TEXT
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS takip_edilen_sehirler (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sehir TEXT UNIQUE
+                )
+            """)
+
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_analiz_sehir "
+                "ON analiz_kayitlari(sehir)"
+            )
+
+        logger.info("Veritabanı hazır: gerekli tablolar ve indeksler kontrol edildi.")
+    except sqlite3.Error:
+        logger.exception("Veritabanı oluşturma hatası")
+        raise
 
 
 veritabani_olustur()
 
 
-def normalize_text(text):
+# -----------------------------------------------------------------------------
+# 4. TEXT / DATA HELPERS
+# -----------------------------------------------------------------------------
+def normalize_text(text: Any) -> str:
     text = str(text).lower()
-    text = unicodedata.normalize('NFKD', text)
-    return ''.join(c for c in text if not unicodedata.combining(c))
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in text if not unicodedata.combining(c))
 
 
-def turkce_sirala(liste):
+def turkce_sirala(liste: List[str]) -> List[str]:
     """Türkçe karakterleri dikkate alarak alfabetik sıralama yapar."""
-    return sorted(liste, key=lambda x: normalize_text(x))
+    return sorted(liste, key=normalize_text)
 
 
-def gorunum_duzelt(text):
+def gorunum_duzelt(text: Any) -> str:
     """KONYA / konya gibi değerleri Türkçe karakterleri bozmadan düzgün gösterir."""
     text = str(text).strip()
 
     if not text or text.lower() == "nan":
         return ""
 
-    text = text.replace("I", "ı").replace("İ", "i")
-    text = text.lower()
-
-    kelimeler = []
-    for kelime in text.split():
-        if kelime:
-            kelimeler.append(kelime[0].upper() + kelime[1:])
-
-    return " ".join(kelimeler)
+    text = text.replace("I", "ı").replace("İ", "i").lower()
+    return " ".join(
+        kelime[0].upper() + kelime[1:]
+        for kelime in text.split()
+        if kelime
+    )
 
 
-def tekil_ve_sirali(liste):
-    """Büyük/küçük harf farkından doğan tekrarları temizler ve Türkçe uyumlu sıralar."""
-    temiz = {}
+def tekil_ve_sirali(liste: List[Any]) -> List[str]:
+    """Tekrarları temizler ve Türkçe uyumlu sıralama yapar."""
+    temiz: Dict[str, str] = {}
 
     for item in liste:
         item = str(item).strip()
@@ -105,97 +205,106 @@ def tekil_ve_sirali(liste):
             continue
 
         anahtar = normalize_text(item)
-
         if anahtar not in temiz:
             temiz[anahtar] = gorunum_duzelt(item)
 
     return turkce_sirala(list(temiz.values()))
 
 
-def afad_depremleri_getir():
+# -----------------------------------------------------------------------------
+# 5. EARTHQUAKE API / CACHE
+# -----------------------------------------------------------------------------
+DEPREM_CACHE: Dict[str, Any] = {"zaman": 0.0, "veri": []}
+DEPREM_CACHE_LOCK = threading.Lock()
+DEPREM_CACHE_TTL = max(30, int(os.environ.get("DEPREM_CACHE_TTL", "300")))
+
+
+def afad_depremleri_getir() -> List[Dict[str, Any]]:
+    url = "https://deprem.afad.gov.tr/apiv2/event/latest"
+
     try:
-        url = "https://deprem.afad.gov.tr/apiv2/event/latest"
-        r = requests.get(url, timeout=3)
+        veriler = _http_get_json(url)
+        if not isinstance(veriler, list):
+            logger.warning("AFAD API beklenmeyen veri döndürdü.")
+            return []
 
-        if r.status_code == 200:
-            veriler = r.json()
-            depremler = []
+        depremler: List[Dict[str, Any]] = []
+        for d in veriler[:30]:
+            try:
+                mag = float(d.get("magnitude", 0))
+                lat = float(d.get("latitude", 0))
+                lon = float(d.get("longitude", 0))
 
-            for d in veriler[:30]:
-                try:
-                    mag = float(d.get("magnitude", 0))
-                    lat = float(d.get("latitude", 0))
-                    lon = float(d.get("longitude", 0))
+                depremler.append({
+                    "kaynak": "AFAD",
+                    "title": d.get("location", "Bilinmeyen Konum"),
+                    "mag": mag,
+                    "date": d.get("date", ""),
+                    "geojson": {"coordinates": [lon, lat]},
+                })
+            except (TypeError, ValueError):
+                continue
 
-                    depremler.append({
-                        "kaynak": "AFAD",
-                        "title": d.get("location", "Bilinmeyen Konum"),
-                        "mag": mag,
-                        "date": d.get("date", ""),
-                        "geojson": {
-                            "coordinates": [lon, lat]
-                        }
-                    })
-
-                except Exception:
-                    continue
-
-            return depremler
-
-    except Exception as e:
-        print("AFAD API hatası:", e)
-
-    return []
+        return depremler
+    except Exception:
+        logger.exception("AFAD API hatası")
+        return []
 
 
-def kandilli_depremleri_getir():
+def kandilli_depremleri_getir() -> List[Dict[str, Any]]:
+    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+
     try:
-        url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
-        r = requests.get(url, timeout=3)
+        payload = _http_get_json(url)
+        if not isinstance(payload, dict):
+            logger.warning("Kandilli API beklenmeyen veri döndürdü.")
+            return []
 
-        if r.status_code == 200:
-            depremler = r.json().get("result", [])
+        depremler = payload.get("result", [])
+        if not isinstance(depremler, list):
+            return []
 
-            for d in depremler:
-                d["kaynak"] = "Kandilli"
+        temiz_depremler: List[Dict[str, Any]] = []
+        for deprem in depremler[:30]:
+            if isinstance(deprem, dict):
+                item = dict(deprem)
+                item["kaynak"] = "Kandilli"
+                temiz_depremler.append(item)
 
-            return depremler[:30]
-
-    except Exception as e:
-        print("Kandilli API hatası:", e)
-
-    return []
+        return temiz_depremler
+    except Exception:
+        logger.exception("Kandilli API hatası")
+        return []
 
 
-DEPREM_CACHE = {
-    "zaman": 0,
-    "veri": []
-}
-
-def canlı_depremleri_getir():
+def canlı_depremleri_getir() -> List[Dict[str, Any]]:
     simdi = time.time()
 
-    if DEPREM_CACHE["veri"] and simdi - DEPREM_CACHE["zaman"] < 300:
-        return DEPREM_CACHE["veri"]
+    with DEPREM_CACHE_LOCK:
+        if (
+            DEPREM_CACHE["veri"]
+            and simdi - float(DEPREM_CACHE["zaman"]) < DEPREM_CACHE_TTL
+        ):
+            return list(DEPREM_CACHE["veri"])
 
     afad = afad_depremleri_getir()
+    veri = afad or kandilli_depremleri_getir()
 
-    if afad:
-        DEPREM_CACHE["veri"] = afad
+    with DEPREM_CACHE_LOCK:
+        DEPREM_CACHE["veri"] = list(veri)
         DEPREM_CACHE["zaman"] = simdi
-        return afad
 
-    kandilli = kandilli_depremleri_getir()
-    DEPREM_CACHE["veri"] = kandilli
-    DEPREM_CACHE["zaman"] = simdi
-    return kandilli
+    return veri
 
 
-def zemin_bilgisi_getir(zemin_df, sehir, ilce="", mahalle=""):
+# -----------------------------------------------------------------------------
+# 6. RISK / SOIL / MAP HELPERS
+# -----------------------------------------------------------------------------
+def zemin_bilgisi_getir(zemin_df: Optional[pd.DataFrame], sehir: str, ilce: str = "", mahalle: str = "") -> Dict[str, Any]:
     varsayilan = {
         "tip": "Zemin verisi bulunamadı",
         "risk": 5,
-        "aciklama": "Bu bölge için kayıtlı zemin verisi bulunamadığı için analizde varsayılan orta düzey zemin riski kullanılmıştır."
+        "aciklama": "Bu bölge için kayıtlı zemin verisi bulunamadığı için analizde varsayılan orta düzey zemin riski kullanılmıştır.",
     }
 
     if zemin_df is None or zemin_df.empty or not sehir:
@@ -221,20 +330,21 @@ def zemin_bilgisi_getir(zemin_df, sehir, ilce="", mahalle=""):
             return varsayilan
 
         satir = df.iloc[0]
-
         return {
             "tip": satir.get("Zemin_Tipi", "Belirtilmemiş"),
             "risk": float(satir.get("Zemin_Riski", 5)),
-            "aciklama": satir.get("Zemin_Aciklama", "Bu bölgenin zemin bilgisi veri setinden alınmıştır.")
+            "aciklama": satir.get(
+                "Zemin_Aciklama",
+                "Bu bölgenin zemin bilgisi veri setinden alınmıştır.",
+            ),
         }
-
-    except Exception as e:
-        print("Zemin bilgisi okuma hatası:", e)
+    except Exception:
+        logger.exception("Zemin bilgisi okuma hatası")
         return varsayilan
 
 
-def acil_oneriler_uret(risk_durumu, inputs):
-    oneriler = []
+def acil_oneriler_uret(risk_durumu: str, inputs: Optional[Tuple[float, float, float, float, float, float]]) -> List[str]:
+    oneriler: List[str] = []
 
     if not inputs:
         return oneriler
@@ -245,85 +355,73 @@ def acil_oneriler_uret(risk_durumu, inputs):
         oneriler.extend([
             "Mevcut afet hazırlık planları düzenli olarak güncellenmelidir.",
             "Acil durum çantası ve aile iletişim planı hazır tutulmalıdır.",
-            "Düzenli afet farkındalık tatbikatları yapılmalıdır."
+            "Düzenli afet farkındalık tatbikatları yapılmalıdır.",
         ])
-
     elif risk_durumu == "Orta Riskli":
         oneriler.extend([
             "Tahliye yolları ve toplanma alanları yeniden kontrol edilmelidir.",
             "Riskli yapıların ön incelemesi yapılmalıdır.",
-            "Acil iletişim ve yerel müdahale planı oluşturulmalıdır."
+            "Acil iletişim ve yerel müdahale planı oluşturulmalıdır.",
         ])
-
     elif risk_durumu == "Kritik / Riskli":
         oneriler.extend([
             "Bu bölgede acil tahliye planı oluşturulmalıdır.",
             "Toplanma alanı kapasitesi artırılmalıdır.",
             "Eski yapılar için bina dayanıklılık analizi ve güçlendirme önerilir.",
-            "Hastane, itfaiye and ana ulaşım yolları önceliklendirilmelidir."
+            "Hastane, itfaiye ve ana ulaşım yolları önceliklendirilmelidir.",
         ])
 
     if bina_yasi >= 25:
         oneriler.append("Bina yaşı yüksek olduğu için yapı güvenliği analizi yapılmalıdır.")
-
     if nufus >= 5000:
         oneriler.append("Nüfus yoğunluğu yüksek olduğu için tahliye süresi uzayabilir.")
-
     if toplanma <= 3:
         oneriler.append("Toplanma alanı yetersiz görünüyor; alternatif güvenli alanlar belirlenmelidir.")
-
     if itfaiye <= 3:
         oneriler.append("İtfaiye müdahale kapasitesi artırılmalıdır.")
-
     if yatak <= 3:
         oneriler.append("Sağlık kapasitesi düşük görünüyor; geçici sağlık noktaları planlanmalıdır.")
-
     if zemin >= 7:
         oneriler.append("Zemin riski yüksek olduğu için detaylı zemin etüdü yapılmalıdır.")
 
     return list(dict.fromkeys(oneriler))
 
 
-def risk_skoru_getir(risk_durumu):
-    if risk_durumu == "Güvenli Bölge":
-        return 1
-    elif risk_durumu == "Orta Riskli":
-        return 3
-    elif risk_durumu == "Kritik / Riskli":
-        return 5
-    return 0
+def risk_skoru_getir(risk_durumu: str) -> int:
+    return {
+        "Güvenli Bölge": 1,
+        "Orta Riskli": 3,
+        "Kritik / Riskli": 5,
+    }.get(risk_durumu, 0)
 
 
-def risk_rengi_getir(risk_skoru):
-    renkler = {
+def risk_rengi_getir(risk_skoru: int) -> str:
+    return {
         0: "#d9d9d9",
         1: "#2ecc71",
         2: "#f1c40f",
         3: "#f39c12",
         4: "#e74c3c",
-        5: "#8b0000"
-    }
-
-    return renkler.get(risk_skoru, "#d9d9d9")
+        5: "#8b0000",
+    }.get(risk_skoru, "#d9d9d9")
 
 
-def geojson_sehir_adi_bul(feature):
-    props = feature.get("properties", {})
-
+def geojson_sehir_adi_bul(feature: Dict[str, Any]) -> Any:
+    props = feature.get("properties", {}) or {}
     olasi_alanlar = [
-        "name", "NAME_1", "Name", "il", "Il", "IL", "province", "Province", "sehir", "Sehir"
+        "name", "NAME_1", "Name", "il", "Il", "IL",
+        "province", "Province", "sehir", "Sehir",
     ]
 
     for alan in olasi_alanlar:
         if alan in props:
             return props[alan]
-
     return ""
 
 
-def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
+def sehirleri_renklendir(m: folium.Map, secilen_sehir: str, risk_skoru: int, risk_durumu: str) -> None:
     if not os.path.exists(geojson_yolu):
-        print("GeoJSON dosyası bulunamadı:", geojson_yolu)
+        logger.warning("GeoJSON dosyası bulunamadı: %s", geojson_yolu)
         return
 
     try:
@@ -332,7 +430,7 @@ def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
 
         secilen_norm = normalize_text(secilen_sehir)
 
-        def style_function(feature):
+        def style_function(feature: Dict[str, Any]) -> Dict[str, Any]:
             sehir_adi = geojson_sehir_adi_bul(feature)
             sehir_norm = normalize_text(sehir_adi)
 
@@ -341,22 +439,22 @@ def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
                     "fillColor": risk_rengi_getir(risk_skoru),
                     "color": "#111111",
                     "weight": 2,
-                    "fillOpacity": 0.75
+                    "fillOpacity": 0.75,
                 }
 
             return {
                 "fillColor": "#f7f7f7",
                 "color": "#666666",
                 "weight": 1,
-                "fillOpacity": 0.25
+                "fillOpacity": 0.25,
             }
 
-        def highlight_function(feature):
+        def highlight_function(feature: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "fillColor": "#ffff99",
                 "color": "#000000",
                 "weight": 3,
-                "fillOpacity": 0.7
+                "fillOpacity": 0.7,
             }
 
         folium.GeoJson(
@@ -365,58 +463,54 @@ def sehirleri_renklendir(m, secilen_sehir, risk_skoru, risk_durumu):
             style_function=style_function,
             highlight_function=highlight_function,
             tooltip=folium.GeoJsonTooltip(
-                fields=[],
-                aliases=[],
-                sticky=True,
-                labels=False
-            )
+                fields=[], aliases=[], sticky=True, labels=False
+            ),
         ).add_to(m)
 
         if secilen_sehir and risk_skoru > 0:
             folium.Marker(
                 location=[39, 35],
                 popup=f"{secilen_sehir} - {risk_durumu} - Risk Skoru: {risk_skoru}/5",
-                icon=folium.Icon(color="red", icon="info-sign")
+                icon=folium.Icon(color="red", icon="info-sign"),
             ).add_to(m)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        logger.exception("GeoJSON harita işleme hatası")
 
-    except Exception as e:
-        print("GeoJSON harita hatası:", e)
 
-
+# -----------------------------------------------------------------------------
+# 7. BASIC ROUTES
+# -----------------------------------------------------------------------------
 @app.route("/healthz")
 def healthz():
     return "OK", 200
 
 
-# SEYAHAT TAKİP SİSTEMİ: Yeni Şehir Ekleme Rotaları (POST)
 @app.route("/takip-ekle", methods=["POST"])
 def takip_ekle():
     sehir = gorunum_duzelt(request.form.get("takipSehirInput", ""))
     if sehir:
         try:
-            conn = sqlite3.connect(db_yolu)
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR IGNORE INTO takip_edilen_sehirler (sehir) VALUES (?)", (sehir,))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print("Takip ekleme hatası:", e)
+            with get_db_connection() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO takip_edilen_sehirler (sehir) VALUES (?)",
+                    (sehir,),
+                )
+        except sqlite3.Error:
+            logger.exception("Takip ekleme hatası")
     return redirect(url_for("index"))
 
 
-# SEYAHAT TAKİP SİSTEMİ: Şehir Takibini Silme Rotaları (GET)
 @app.route("/takip-sil/<sehir>", methods=["GET"])
 def takip_sil(sehir):
     try:
-        conn = sqlite3.connect(db_yolu)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM takip_edilen_sehirler WHERE sehir = ?", (gorunum_duzelt(sehir),))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print("Takip silme hatası:", e)
+        with get_db_connection() as conn:
+            conn.execute(
+                "DELETE FROM takip_edilen_sehirler WHERE sehir = ?",
+                (gorunum_duzelt(sehir),),
+            )
+    except sqlite3.Error:
+        logger.exception("Takip silme hatası")
     return redirect(url_for("index"))
-
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -460,7 +554,7 @@ def index():
             conn.close()
 
         except Exception as e:
-            print("Veritabanı okuma hatası:", e)
+            logger.exception("Veritabanı okuma hatası")
 
     if not sehirler and os.path.exists(data_yolu):
         try:
@@ -470,7 +564,7 @@ def index():
                 sehirler = tekil_ve_sirali(df["Sehir"].dropna().unique().tolist())
 
         except Exception as e:
-            print("CSV veri okuma hatası:", e)
+            logger.exception("CSV veri okuma hatası")
 
     if os.path.exists(ilce_yolu):
         try:
@@ -482,7 +576,7 @@ def index():
                     ilce_verileri[sehir_temiz] = tekil_ve_sirali(grup["Ilce"].dropna().unique().tolist())
 
         except Exception as e:
-            print("İlçe CSV okuma hatası:", e)
+            logger.exception("İlçe CSV okuma hatası")
 
     if os.path.exists(zemin_yolu):
         try:
@@ -503,7 +597,7 @@ def index():
                     mahalle_verileri[anahtar] = tekil_ve_sirali(grup["Mahalle"].dropna().unique().tolist())
 
         except Exception as e:
-            print("Zemin CSV okuma hatası:", e)
+            logger.exception("Zemin CSV okuma hatası")
 
     tum_sehirler = set(sehirler)
     tum_sehirler.update(ilce_verileri.keys())
@@ -629,10 +723,10 @@ def index():
                     conn.commit()
                     conn.close()
 
-                    print("Analiz veritabanına kaydedildi.")
+                    logger.info("Analiz veritabanına kaydedildi.")
 
                 except Exception as db_hata:
-                    print("Veritabanı kayıt hatası:", db_hata)
+                    logger.exception("Veritabanı kayıt hatası")
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_
@@ -661,7 +755,7 @@ def index():
 
         except Exception as e:
             tahmin_sonucu = "Veri hatası!"
-            print("Model hata:", e)
+            logger.exception("Model yükleme/tahmin hatası")
 
     if os.path.exists(db_yolu):
         try:
@@ -674,7 +768,7 @@ def index():
             takip_listesi_json = json.dumps([r[0] for r in cursor.fetchall()], ensure_ascii=False)
             conn.close()
         except Exception as e:
-            print("Veritabanı panel verisi çekme hatası:", e)
+            logger.exception("Veritabanı panel verisi çekme hatası")
 
     m = folium.Map(
         location=[39, 35],
@@ -2317,5 +2411,19 @@ def gecmis():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Flask development server is retained for local development only.
+    # Production should be served by a WSGI server such as Gunicorn/Waitress.
+    is_debug = ENVIRONMENT == "development"
+    port = int(os.environ.get("PORT", "5000"))
+    logger.info(
+        "RiskAtlas V2 başlatılıyor | ortam=%s | port=%s | debug=%s",
+        ENVIRONMENT,
+        port,
+        is_debug,
+    )
+    app.run(
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=port,
+        debug=is_debug,
+    )
 

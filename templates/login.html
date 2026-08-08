@@ -10,35 +10,43 @@
 
 <div class="login-container">
 
-    <div class="login-card">
+    <div class="login-card" role="main" aria-labelledby="login-title">
 
         <img src="{{ url_for('static', filename='images/logo.png') }}"
              alt="RiskAtlas Logo"
              class="login-logo">
 
-        <h1>RiskAtlas</h1>
+        <h1 id="login-title">RiskAtlas</h1>
 
         <p class="subtitle">
             Yapay Zekâ Destekli Deprem Analiz ve Erken Uyarı Sistemi
         </p>
 
-        <!-- Flask Flash Mesajları -->
+        <div id="jsErrorSummary" class="js-error-summary" role="alert" aria-live="assertive"></div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert {{ category }}">
-                        {{ message }}
-                    </div>
-                {% endfor %}
+                <div class="flash-messages-wrapper" role="alert" aria-live="assertive">
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
             {% endif %}
         {% endwith %}
 
-        <form method="POST" action="{{ url_for('login') }}">
+        <form id="loginForm" method="POST" action="{{ url_for('login') }}" novalidate autocomplete="on">
+            {% if form and form.csrf_token %}
+                {{ form.csrf_token }}
+            {% elif csrf_token %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% endif %}
 
             <div class="form-group">
 
                 <label for="email">
-                    <i class="fa-solid fa-envelope"></i>
+                    <i class="fa-solid fa-envelope" aria-hidden="true"></i>
                     E-Posta
                 </label>
 
@@ -48,6 +56,8 @@
                     type="email"
                     placeholder="ornek@mail.com"
                     autocomplete="email"
+                    aria-required="true"
+                    aria-describedby="jsErrorSummary"
                     required>
 
             </div>
@@ -55,27 +65,47 @@
             <div class="form-group">
 
                 <label for="password">
-                    <i class="fa-solid fa-lock"></i>
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
                     Şifre
                 </label>
 
-                <input
-                    id="password"
-                    name="password"
-                    type="password"
-                    placeholder="Şifrenizi giriniz"
-                    autocomplete="current-password"
-                    required>
+                <div class="password-wrapper">
+                    <input
+                        id="password"
+                        name="password"
+                        type="password"
+                        placeholder="Şifrenizi giriniz"
+                        autocomplete="current-password"
+                        aria-required="true"
+                        aria-describedby="capsLockWarning jsErrorSummary"
+                        required>
+                    
+                    <button 
+                        type="button" 
+                        id="togglePassword" 
+                        class="toggle-password-btn" 
+                        aria-label="Şifreyi göster"
+                        title="Şifreyi Göster/Gizle">
+                        <i class="fa-solid fa-eye-slash" id="togglePasswordIcon" aria-hidden="true"></i>
+                    </button>
+                </div>
+
+                <div id="capsLockWarning" class="caps-lock-warning" role="alert" aria-live="polite">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span><strong>Dikkat:</strong> Caps Lock tuşunuz açık.</span>
+                </div>
 
             </div>
 
             <div class="remember-row">
 
-                <label>
+                <label for="remember">
 
                     <input
                         type="checkbox"
-                        name="remember">
+                        id="remember"
+                        name="remember"
+                        autocomplete="off">
 
                     Beni Hatırla
 
@@ -85,11 +115,12 @@
 
             <button
                 type="submit"
+                id="submitBtn"
                 class="btn-login">
 
-                <i class="fa-solid fa-right-to-bracket"></i>
+                <i class="fa-solid fa-right-to-bracket" id="submitIcon" aria-hidden="true"></i>
 
-                Giriş Yap
+                <span id="submitBtnText">Giriş Yap</span>
 
             </button>
 
@@ -101,7 +132,7 @@
 
         <a href="{{ url_for('register') }}" class="register-link">
 
-            <i class="fa-solid fa-user-plus"></i>
+            <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
 
             Hesabınız yok mu? Hesap Oluştur
 
@@ -111,7 +142,7 @@
             id="voiceLogin"
             class="voice-button">
 
-            <i class="fa-solid fa-microphone"></i>
+            <i class="fa-solid fa-microphone" aria-hidden="true"></i>
 
             Sesli Yardımı Başlat
 
@@ -119,7 +150,7 @@
 
         <div class="guest-area">
 
-            <a href="{{ url_for('index') }}"
+            <a href="{{ url_for('guest_login') }}"
                class="guest-link">
 
                 Misafir Olarak Devam Et
@@ -135,5 +166,117 @@
 {% endblock %}
 
 {% block page_js %}
-<script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+<script>
+(function () {
+    "use strict";
+
+    // Giriş ekranında sesli yardım kesin olarak OPT-IN'dir.
+    // Sayfa yüklenmesi, dokunma, tıklama veya klavye hareketi mikrofonu açamaz.
+    const voiceButton = document.getElementById("voiceLogin");
+    const emailInput = document.getElementById("email");
+    const passwordInput = document.getElementById("password");
+    const loginForm = document.getElementById("loginForm");
+
+    if (!voiceButton) return;
+
+    let recognition = null;
+    let listening = false;
+
+    function speak(text) {
+        if (!("speechSynthesis" in window)) return;
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "tr-TR";
+        utterance.rate = 0.95;
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function normalizeEmail(text) {
+        return text
+            .toLowerCase()
+            .replace(/\s+at\s+/g, "@")
+            .replace(/\s+et\s+/g, "@")
+            .replace(/\s+nokta\s+/g, ".")
+            .replace(/\s+/g, "");
+    }
+
+    function stopListening() {
+        listening = false;
+        if (recognition) {
+            try { recognition.stop(); } catch (e) {}
+        }
+        voiceButton.setAttribute("aria-pressed", "false");
+        voiceButton.classList.remove("active");
+    }
+
+    voiceButton.addEventListener("click", function () {
+        if (listening) {
+            stopListening();
+            speak("Sesli yardım kapatıldı.");
+            return;
+        }
+
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Recognition) {
+            speak("Bu tarayıcı sesli komut özelliğini desteklemiyor.");
+            return;
+        }
+
+        recognition = new Recognition();
+        recognition.lang = "tr-TR";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        listening = true;
+        voiceButton.setAttribute("aria-pressed", "true");
+        voiceButton.classList.add("active");
+
+        speak("Sesli yardım etkin. E posta adresinizi, şifrenizi veya giriş yap komutunu söyleyebilirsiniz.");
+
+        recognition.onresult = function (event) {
+            const command = event.results[0][0].transcript.trim();
+            const lower = command.toLocaleLowerCase("tr-TR");
+
+            if (lower.includes("giriş yap") || lower.includes("giris yap")) {
+                stopListening();
+                loginForm.submit();
+                return;
+            }
+
+            if (lower.startsWith("e posta") || lower.startsWith("eposta") || lower.startsWith("e-posta")) {
+                const value = command
+                    .replace(/^e\s*-?posta\s*/i, "")
+                    .replace(/^eposta\s*/i, "");
+                emailInput.value = normalizeEmail(value);
+                speak("E posta adresi alındı. Şimdi şifrenizi söyleyin.");
+                return;
+            }
+
+            if (lower.startsWith("şifre") || lower.startsWith("sifre")) {
+                passwordInput.value = command.replace(/^şifre\s*/i, "").replace(/^sifre\s*/i, "").trim();
+                speak("Şifre alındı. Giriş yapmak için giriş yap diyebilirsiniz.");
+                return;
+            }
+
+            speak("Komutu anlayamadım. E posta, şifre veya giriş yap diyebilirsiniz.");
+        };
+
+        recognition.onerror = function () {
+            stopListening();
+        };
+
+        recognition.onend = function () {
+            listening = false;
+            voiceButton.setAttribute("aria-pressed", "false");
+            voiceButton.classList.remove("active");
+        };
+
+        try {
+            recognition.start();
+        } catch (e) {
+            stopListening();
+        }
+    });
+})();
+</script>
 {% endblock %}

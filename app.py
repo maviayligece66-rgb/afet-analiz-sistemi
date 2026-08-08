@@ -1,3 +1,6 @@
+
+
+
 import json
 import logging
 import os
@@ -13,7 +16,9 @@ import folium
 import joblib
 import pandas as pd
 import requests
-from flask import Flask, make_response, redirect, render_template, request, url_for
+from flask import Flask, flash, make_response, redirect, render_template, request, session, url_for
+from functools import wraps
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 # -----------------------------------------------------------------------------
@@ -48,6 +53,7 @@ app.config.update(
         os.environ.get("SESSION_COOKIE_SECURE", "1" if IS_PRODUCTION else "0") == "1"
     ),
     MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024))),
+    SESSION_REFRESH_EACH_REQUEST=True,
 )
 
 DATA_PATHS = {
@@ -133,29 +139,69 @@ def veritabani_olustur() -> None:
             cursor = conn.cursor()
 
             cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fullname TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    password_hash TEXT NOT NULL,
+                    home_city TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS analiz_kayitlari (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
                     sehir TEXT,
                     ilce TEXT,
                     mahalle TEXT,
                     risk_sonucu TEXT,
                     risk_skoru INTEGER,
                     zemin_riski REAL,
-                    tarih TEXT
+                    tarih TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS takip_edilen_sehirler (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sehir TEXT UNIQUE
+                    user_id INTEGER NOT NULL,
+                    sehir TEXT NOT NULL,
+                    UNIQUE(user_id, sehir),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
 
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_analiz_sehir "
-                "ON analiz_kayitlari(sehir)"
-            )
+            # Eski veritabanlarında user_id olmayan tabloları güvenli biçimde yükselt.
+            cursor.execute("PRAGMA table_info(analiz_kayitlari)")
+            analiz_kolonlari = {row[1] for row in cursor.fetchall()}
+            if "user_id" not in analiz_kolonlari:
+                cursor.execute("ALTER TABLE analiz_kayitlari ADD COLUMN user_id INTEGER")
+
+            cursor.execute("PRAGMA table_info(takip_edilen_sehirler)")
+            takip_kolonlari = {row[1] for row in cursor.fetchall()}
+            if "user_id" not in takip_kolonlari:
+                # Eski sürümde sehir alanı UNIQUE idi. Yeni sürümde benzersizlik
+                # kullanıcı + şehir çiftine ait olmalı; tabloyu güvenli biçimde yenile.
+                cursor.execute("ALTER TABLE takip_edilen_sehirler RENAME TO takip_edilen_sehirler_legacy")
+                cursor.execute("""
+                    CREATE TABLE takip_edilen_sehirler (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        sehir TEXT NOT NULL,
+                        UNIQUE(user_id, sehir),
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                """)
+                # Eski global takip kayıtları kullanıcıya ait olmadığı için otomatik
+                # olarak herhangi bir hesaba bağlanmaz; veri karışmasını önler.
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_sehir ON analiz_kayitlari(sehir)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_user ON analiz_kayitlari(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_takip_user ON takip_edilen_sehirler(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
         logger.info("Veritabanı hazır: gerekli tablolar ve indeksler kontrol edildi.")
     except sqlite3.Error:
@@ -167,7 +213,142 @@ veritabani_olustur()
 
 
 # -----------------------------------------------------------------------------
-# 4. TEXT / DATA HELPERS
+# 4. AUTHENTICATION / USER CONTEXT
+# -----------------------------------------------------------------------------
+def login_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Devam etmek için önce giriş yapmalısınız.", "warning")
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped_view
+
+
+def current_user() -> Optional[sqlite3.Row]:
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    try:
+        with get_db_connection() as conn:
+            return conn.execute(
+                "SELECT id, fullname, email, home_city FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+    except sqlite3.Error:
+        logger.exception("Aktif kullanıcı okunamadı")
+        return None
+
+
+def current_user_id() -> Optional[int]:
+    user_id = session.get("user_id")
+    try:
+        return int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        session.clear()
+        return None
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("user_id"):
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        remember = request.form.get("remember") == "on"
+
+        if not email or not password:
+            flash("E-posta ve şifre alanları zorunludur.", "error")
+            return render_template("login.html")
+
+        try:
+            with get_db_connection() as conn:
+                user = conn.execute(
+                    "SELECT id, fullname, email, password_hash, home_city FROM users WHERE email = ? COLLATE NOCASE",
+                    (email,),
+                ).fetchone()
+        except sqlite3.Error:
+            logger.exception("Login sırasında veritabanı hatası")
+            flash("Giriş sırasında bir sistem hatası oluştu. Lütfen tekrar deneyin.", "error")
+            return render_template("login.html")
+
+        if not user or not check_password_hash(user["password_hash"], password):
+            flash("E-posta veya şifre hatalı.", "error")
+            return render_template("login.html")
+
+        session.clear()
+        session["user_id"] = int(user["id"])
+        session["user_name"] = user["fullname"]
+        session.permanent = remember
+        logger.info("Kullanıcı giriş yaptı: %s", user["email"])
+
+        next_url = request.args.get("next", "")
+        if next_url.startswith("/") and not next_url.startswith("//"):
+            return redirect(next_url)
+        return redirect(url_for("index"))
+
+    return render_template("login.html")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if session.get("user_id"):
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        fullname = request.form.get("fullname", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        home_city = gorunum_duzelt(request.form.get("home_city", ""))
+
+        if len(fullname) < 2 or not email or len(password) < 6 or not home_city:
+            flash("Lütfen tüm alanları doğru şekilde doldurun. Şifre en az 6 karakter olmalıdır.", "error")
+            return render_template("register.html")
+
+        try:
+            password_hash = generate_password_hash(password)
+            with get_db_connection() as conn:
+                conn.execute(
+                    "INSERT INTO users (fullname, email, password_hash, home_city, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (fullname, email, password_hash, home_city, datetime.now().isoformat(timespec="seconds")),
+                )
+            flash("Hesabınız oluşturuldu. Şimdi giriş yapabilirsiniz.", "success")
+            return redirect(url_for("login"))
+        except sqlite3.IntegrityError:
+            flash("Bu e-posta adresiyle zaten bir hesap bulunuyor.", "error")
+        except sqlite3.Error:
+            logger.exception("Kayıt sırasında veritabanı hatası")
+            flash("Kayıt sırasında bir sistem hatası oluştu. Lütfen tekrar deneyin.", "error")
+
+    return render_template("register.html")
+
+
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    user_name = session.get("user_name", "bilinmeyen")
+    session.clear()
+    logger.info("Kullanıcı çıkış yaptı: %s", user_name)
+    return redirect(url_for("login"))
+
+
+@app.route("/api/ev-konumu", methods=["POST"])
+@login_required
+def ev_konumu_guncelle():
+    sehir = gorunum_duzelt(request.form.get("sehir", ""))
+    if not sehir:
+        return {"ok": False, "error": "Geçerli bir şehir girilmelidir."}, 400
+
+    user_id = current_user_id()
+    with get_db_connection() as conn:
+        conn.execute("UPDATE users SET home_city = ? WHERE id = ?", (sehir, user_id))
+
+    return {"ok": True, "home_city": sehir}
+
+
+# -----------------------------------------------------------------------------
+# 5. TEXT / DATA HELPERS
 # -----------------------------------------------------------------------------
 def normalize_text(text: Any) -> str:
     text = str(text).lower()
@@ -477,23 +658,48 @@ def sehirleri_renklendir(m: folium.Map, secilen_sehir: str, risk_skoru: int, ris
         logger.exception("GeoJSON harita işleme hatası")
 
 
+# Model tek sefer yüklenir; her analiz isteğinde diskten tekrar okunmaz.
+MODEL_CACHE = None
+MODEL_CACHE_LOCK = threading.Lock()
+
+
+def get_model():
+    global MODEL_CACHE
+    if MODEL_CACHE is not None:
+        return MODEL_CACHE
+    with MODEL_CACHE_LOCK:
+        if MODEL_CACHE is None:
+            if not os.path.exists(model_yolu):
+                return None
+            MODEL_CACHE = joblib.load(model_yolu)
+            logger.info("Risk modeli belleğe yüklendi.")
+    return MODEL_CACHE
+
+
 # -----------------------------------------------------------------------------
 # 7. BASIC ROUTES
 # -----------------------------------------------------------------------------
 @app.route("/healthz")
 def healthz():
-    return "OK", 200
+    try:
+        with get_db_connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+        return {"status": "ok"}, 200
+    except sqlite3.Error:
+        logger.exception("Health check veritabanı hatası")
+        return {"status": "error"}, 503
 
 
 @app.route("/takip-ekle", methods=["POST"])
+@login_required
 def takip_ekle():
     sehir = gorunum_duzelt(request.form.get("takipSehirInput", ""))
     if sehir:
         try:
             with get_db_connection() as conn:
                 conn.execute(
-                    "INSERT OR IGNORE INTO takip_edilen_sehirler (sehir) VALUES (?)",
-                    (sehir,),
+                    "INSERT OR IGNORE INTO takip_edilen_sehirler (user_id, sehir) VALUES (?, ?)",
+                    (current_user_id(), sehir),
                 )
         except sqlite3.Error:
             logger.exception("Takip ekleme hatası")
@@ -501,18 +707,20 @@ def takip_ekle():
 
 
 @app.route("/takip-sil/<sehir>", methods=["GET"])
+@login_required
 def takip_sil(sehir):
     try:
         with get_db_connection() as conn:
             conn.execute(
-                "DELETE FROM takip_edilen_sehirler WHERE sehir = ?",
-                (gorunum_duzelt(sehir),),
+                "DELETE FROM takip_edilen_sehirler WHERE user_id = ? AND sehir = ?",
+                (current_user_id(), gorunum_duzelt(sehir)),
             )
     except sqlite3.Error:
         logger.exception("Takip silme hatası")
     return redirect(url_for("index"))
 
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     tahmin_sonucu = ""
     risk_durumu = ""
@@ -659,7 +867,7 @@ def index():
             inputs.append(zemin_riski)
 
             if os.path.exists(model_yolu):
-                model = joblib.load(model_yolu)
+                model = get_model()
 
                 df_test = pd.DataFrame([inputs], columns=[
                     'Nufus_Yogunlugu',
@@ -701,6 +909,7 @@ def index():
 
                     cursor.execute("""
                         INSERT INTO analiz_kayitlari (
+                            user_id,
                             sehir,
                             ilce,
                             mahalle,
@@ -711,6 +920,7 @@ def index():
                         )
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (
+                        current_user_id(),
                         secilen_sehir,
                         secilen_ilce,
                         secilen_mahalle,
@@ -761,14 +971,30 @@ def index():
         try:
             conn = sqlite3.connect(db_yolu)
             cursor = conn.cursor()
-            cursor.execute("SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari ORDER BY id DESC LIMIT 5")
+            cursor.execute(
+                "SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+                (current_user_id(),),
+            )
             son_analizler_listesi = cursor.fetchall()
-            
-            cursor.execute("SELECT sehir FROM takip_edilen_sehirler ORDER BY id DESC")
+
+            cursor.execute(
+                "SELECT sehir FROM takip_edilen_sehirler WHERE user_id = ? ORDER BY id DESC",
+                (current_user_id(),),
+            )
             takip_listesi_json = json.dumps([r[0] for r in cursor.fetchall()], ensure_ascii=False)
             conn.close()
         except Exception as e:
             logger.exception("Veritabanı panel verisi çekme hatası")
+
+    user = current_user()
+    if not user:
+        session.clear()
+        return redirect(url_for("login"))
+
+    user_home_city = gorunum_duzelt(user["home_city"])
+    if not secilen_sehir and user_home_city:
+        secilen_sehir = user_home_city
 
     m = folium.Map(
         location=[39, 35],
@@ -1868,7 +2094,7 @@ def index():
             let girisRehberiEtkilesimleBasladi = false;
 
             // KALICI HAFIZA VE ROBOT AYARLARI ALTYAPISI
-            let aktifEvKonumu = localStorage.getItem("riskAtlasAnaEvKonumu") || "Konya";
+            let aktifEvKonumu = {json.dumps(user_home_city, ensure_ascii=False)};
             let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
 
             function aiRobotAyariniGuncelle() {{
@@ -1896,7 +2122,11 @@ def index():
             function evKonumunuGuncelle(sehir) {{
                 if(!sehir) return;
                 aktifEvKonumu = sehir;
-                localStorage.setItem("riskAtlasAnaEvKonumu", sehir);
+                fetch("/api/ev-konumu", {{
+                    method: "POST",
+                    headers: {{"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}},
+                    body: "sehir=" + encodeURIComponent(sehir)
+                }}).catch(() => {{}});
                 const gosterge = document.getElementById("anaEvGosterge");
                 if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + sehir + " (Hafızada Kayıtlı)";
                 
@@ -1905,7 +2135,7 @@ def index():
                     sehirSelect.value = sehir;
                     ilceleriGuncelle();
                 }}
-                robotKonus veSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak güncellendi ve kalıcı hafızaya alındı.");
+                robotKonus veSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak hesabınıza kaydedildi.");
             }}
 
             function buSehriTakibeEkle() {{
@@ -2080,7 +2310,7 @@ def index():
 
                 const metin =
                     "RiskAtlas interaktif yapay zekâ sesli asistan sistemine hoş geldiniz. " +
-                    "Uygulama hafızası etkindir. Şu anda ev konumunuz kalıcı olarak " + aktifEvKonumu + " şeklinde ayarlanmıştır. " +
+                    "Hesabınıza kayıtlı ev konumunuz " + aktifEvKonumu + " şeklindedir. " +
                     "Her girişte form doldurmak zorunda kalmazsınız. Seyahat listenizdeki ek şehirlerde risk algılandığında sistem sizi sesle uyaracaktır. " +
                     "Sesli robotumuz sizi dinlemektedir, bana komut verebilir veya soru sorabilirsiniz.";
 
@@ -2287,7 +2517,7 @@ def index():
             window.onload = function () {{
                 // Hafızadaki ev konumunu başlangıçta yükle ve göstergeyi ayarla
                 const gosterge = document.getElementById("anaEvGosterge");
-                if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + aktifEvKonumu + " (Hafızada Kayıtlı)";
+                if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + aktifEvKonumu + " (Hesabınıza Kayıtlı)";
                 
                 const sehirSelect = document.getElementById("sehir");
                 if(sehirSelect && aktifEvKonumu) {{
@@ -2325,6 +2555,7 @@ def index():
 
 
 @app.route("/gecmis")
+@login_required
 def gecmis():
     try:
         conn = sqlite3.connect(db_yolu)
@@ -2339,8 +2570,9 @@ def gecmis():
                 zemin_riski,
                 tarih
             FROM analiz_kayitlari
+            WHERE user_id = ?
             ORDER BY id DESC
-        """, conn)
+        """, conn, params=(current_user_id(),))
         conn.close()
 
         if df.empty:

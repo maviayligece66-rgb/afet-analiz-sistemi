@@ -139,6 +139,7 @@
         </a>
 
         <button
+            type="button"
             id="voiceLogin"
             class="voice-button">
 
@@ -171,8 +172,6 @@
 (function () {
     "use strict";
 
-    // Giriş ekranında sesli yardım kesin olarak OPT-IN'dir.
-    // Sayfa yüklenmesi, dokunma, tıklama veya klavye hareketi mikrofonu açamaz.
     const voiceButton = document.getElementById("voiceLogin");
     const emailInput = document.getElementById("email");
     const passwordInput = document.getElementById("password");
@@ -182,23 +181,36 @@
 
     let recognition = null;
     let listening = false;
+    let welcomeSpoken = false;
 
-    function speak(text) {
-        if (!("speechSynthesis" in window)) return;
+    function speak(text, onEnd) {
+        if (!("speechSynthesis" in window)) {
+            if (typeof onEnd === "function") onEnd();
+            return;
+        }
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = "tr-TR";
         utterance.rate = 0.95;
+        utterance.pitch = 1;
+        utterance.onend = function () {
+            if (typeof onEnd === "function") onEnd();
+        };
         window.speechSynthesis.speak(utterance);
     }
 
     function normalizeEmail(text) {
         return text
-            .toLowerCase()
+            .toLocaleLowerCase("tr-TR")
             .replace(/\s+at\s+/g, "@")
             .replace(/\s+et\s+/g, "@")
             .replace(/\s+nokta\s+/g, ".")
             .replace(/\s+/g, "");
+    }
+
+    function setButton(active) {
+        voiceButton.setAttribute("aria-pressed", active ? "true" : "false");
+        voiceButton.classList.toggle("active", active);
     }
 
     function stopListening() {
@@ -206,59 +218,84 @@
         if (recognition) {
             try { recognition.stop(); } catch (e) {}
         }
-        voiceButton.setAttribute("aria-pressed", "false");
-        voiceButton.classList.remove("active");
+        setButton(false);
     }
 
-    voiceButton.addEventListener("click", function () {
-        if (listening) {
-            stopListening();
-            speak("Sesli yardım kapatıldı.");
+    async function requestMicrophoneAndStart() {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Recognition) {
+            speak("Bu tarayıcı sesli komut özelliğini desteklemiyor. Lütfen ekrandaki giriş seçeneklerini kullanın.");
             return;
         }
 
-        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!Recognition) {
-            speak("Bu tarayıcı sesli komut özelliğini desteklemiyor.");
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            speak("Bu tarayıcı mikrofon izni yönetimini desteklemiyor. Lütfen Sesli Yardımı Başlat düğmesini kullanarak devam edin.");
             return;
         }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+            localStorage.setItem("riskAtlasMikrofonIzni", "acik");
+            startRecognition(Recognition);
+        } catch (error) {
+            localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+            speak("Mikrofon izni verilmedi. Sesli yardımın konuşma komutları kullanılmayacak; sayfayı yine de normal şekilde kullanabilirsiniz.");
+        }
+    }
+
+    function startRecognition(Recognition) {
+        if (listening) return;
 
         recognition = new Recognition();
         recognition.lang = "tr-TR";
-        recognition.continuous = false;
+        recognition.continuous = true;
         recognition.interimResults = false;
         listening = true;
-        voiceButton.setAttribute("aria-pressed", "true");
-        voiceButton.classList.add("active");
-
-        speak("Sesli yardım etkin. E posta adresinizi, şifrenizi veya giriş yap komutunu söyleyebilirsiniz.");
+        setButton(true);
 
         recognition.onresult = function (event) {
-            const command = event.results[0][0].transcript.trim();
-            const lower = command.toLocaleLowerCase("tr-TR");
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                if (!event.results[i].isFinal) continue;
 
-            if (lower.includes("giriş yap") || lower.includes("giris yap")) {
-                stopListening();
-                loginForm.submit();
-                return;
+                const command = event.results[i][0].transcript.trim();
+                const lower = command.toLocaleLowerCase("tr-TR");
+
+                if (lower.includes("istemiyorum") || lower.includes("sesli yardımı kapat") || lower.includes("mikrofonu kapat")) {
+                    stopListening();
+                    localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+                    speak("Anlaşıldı. Sesli yardım ve mikrofon kapatıldı. Deprem sesli alarmı bu ayardan bağımsızdır ve ayarlardan ayrıca yönetilir.");
+                    return;
+                }
+
+                if (lower.includes("istiyorum") || lower.includes("sesli yardımı aç") || lower.includes("sesli yardımı başlat")) {
+                    speak("Sesli yardım etkin. Mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken sesli komutlar için kullanılacaktır.");
+                    return;
+                }
+
+                if (lower.includes("giriş yap") || lower.includes("giris yap")) {
+                    stopListening();
+                    loginForm.submit();
+                    return;
+                }
+
+                if (lower.startsWith("e posta") || lower.startsWith("eposta") || lower.startsWith("e-posta")) {
+                    const value = command
+                        .replace(/^e\s*-?posta\s*/i, "")
+                        .replace(/^eposta\s*/i, "");
+                    emailInput.value = normalizeEmail(value);
+                    speak("E posta adresi alındı. Şimdi şifrenizi söyleyin.");
+                    return;
+                }
+
+                if (lower.startsWith("şifre") || lower.startsWith("sifre")) {
+                    passwordInput.value = command.replace(/^şifre\s*/i, "").replace(/^sifre\s*/i, "").trim();
+                    speak("Şifre alındı. Giriş yapmak için giriş yap diyebilirsiniz.");
+                    return;
+                }
+
+                speak("Komutu anlayamadım. E posta, şifre, giriş yap veya sesli yardımı kapat diyebilirsiniz.");
             }
-
-            if (lower.startsWith("e posta") || lower.startsWith("eposta") || lower.startsWith("e-posta")) {
-                const value = command
-                    .replace(/^e\s*-?posta\s*/i, "")
-                    .replace(/^eposta\s*/i, "");
-                emailInput.value = normalizeEmail(value);
-                speak("E posta adresi alındı. Şimdi şifrenizi söyleyin.");
-                return;
-            }
-
-            if (lower.startsWith("şifre") || lower.startsWith("sifre")) {
-                passwordInput.value = command.replace(/^şifre\s*/i, "").replace(/^sifre\s*/i, "").trim();
-                speak("Şifre alındı. Giriş yapmak için giriş yap diyebilirsiniz.");
-                return;
-            }
-
-            speak("Komutu anlayamadım. E posta, şifre veya giriş yap diyebilirsiniz.");
         };
 
         recognition.onerror = function () {
@@ -266,9 +303,9 @@
         };
 
         recognition.onend = function () {
-            listening = false;
-            voiceButton.setAttribute("aria-pressed", "false");
-            voiceButton.classList.remove("active");
+            if (listening) {
+                try { recognition.start(); } catch (e) {}
+            }
         };
 
         try {
@@ -276,6 +313,36 @@
         } catch (e) {
             stopListening();
         }
+    }
+
+    voiceButton.addEventListener("click", function () {
+        if (listening) {
+            stopListening();
+            localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+            speak("Sesli yardım ve mikrofon kapatıldı.");
+            return;
+        }
+
+        speak(
+            "Sesli yardım etkinleştiriliyor. Mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken kullanılacaktır. İsterseniz istediğiniz zaman istemiyorum diyerek veya bu düğmeye tekrar basarak kapatabilirsiniz.",
+            requestMicrophoneAndStart
+        );
+    });
+
+    // İlk açılışta görme engelli kullanıcı için ekranın ne olduğunu anlatır.
+    // Bu konuşma mikrofonu açmaz.
+    window.addEventListener("load", function () {
+        if (welcomeSpoken) return;
+        welcomeSpoken = true;
+        setTimeout(function () {
+            speak(
+                "Hoş geldiniz, ben RiskAtlas asistanıyım. Giriş ekranındasınız. " +
+                "E posta ve şifrenizle giriş yapabilir, hesap oluşturabilir veya hesap oluşturmadan misafir olarak devam edebilirsiniz. " +
+                "Sesli yardım istemiyorsanız istemiyorum demeniz yeterli. " +
+                "Sesli komutları kullanmak isterseniz Sesli Yardımı Başlat düğmesini seçmeniz gerekir. " +
+                "Mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken sesli komutlar için kullanılacaktır."
+            );
+        }, 250);
     });
 })();
 </script>

@@ -147,6 +147,27 @@ def veritabani_olustur() -> None:
             """)
 
             cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_locations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    location_type TEXT NOT NULL DEFAULT 'visit',
+                    country TEXT,
+                    city TEXT NOT NULL,
+                    latitude REAL,
+                    longitude REAL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, label, city),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_locations_user
+                ON user_locations(user_id)
+            """)
+
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS analiz_kayitlari (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -216,10 +237,23 @@ def login_required(view):
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if not session.get("user_id"):
-            flash("Devam etmek için önce giriş yapmalısınız.", "warning")
+            flash("Bu bölüm için hesap girişi gerekiyor. Ana uygulamayı ise misafir olarak kullanabilirsiniz.", "warning")
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
     return wrapped_view
+
+
+def access_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if not session.get("user_id") and not session.get("guest_mode"):
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped_view
+
+
+def is_guest() -> bool:
+    return bool(session.get("guest_mode")) and not bool(session.get("user_id"))
 
 
 def current_user() -> Optional[sqlite3.Row]:
@@ -244,6 +278,17 @@ def current_user_id() -> Optional[int]:
     except (TypeError, ValueError):
         session.clear()
         return None
+
+
+@app.route("/misafir", methods=["GET", "POST"])
+def guest_login():
+    session.clear()
+    session["guest_mode"] = True
+    session["guest_home_city"] = ""
+    session["guest_track_list"] = []
+    session.permanent = False
+    logger.info("Misafir oturumu başlatıldı.")
+    return redirect(url_for("index"))
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -330,18 +375,78 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/api/ev-konumu", methods=["POST"])
+@app.route("/api/konumlar", methods=["GET", "POST"])
 @login_required
+def kullanici_konumlari():
+    user_id = current_user_id()
+    if request.method == "GET":
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, label, location_type, country, city, latitude, longitude, created_at "
+                "FROM user_locations WHERE user_id = ? ORDER BY id DESC",
+                (user_id,),
+            ).fetchall()
+        return {"ok": True, "locations": [dict(row) for row in rows]}
+
+    data = request.get_json(silent=True) or request.form
+    label = str(data.get("label", "")).strip()
+    location_type = str(data.get("location_type", "visit")).strip().lower() or "visit"
+    country = str(data.get("country", "")).strip()
+    city = gorunum_duzelt(data.get("city", ""))
+
+    if not label or not city:
+        return {"ok": False, "error": "Konum etiketi ve şehir zorunludur."}, 400
+
+    if location_type not in {"home", "visit", "family", "pet", "work", "school", "other"}:
+        location_type = "other"
+
+    try:
+        latitude = float(data.get("latitude")) if data.get("latitude") not in (None, "") else None
+        longitude = float(data.get("longitude")) if data.get("longitude") not in (None, "") else None
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Koordinatlar geçerli değil."}, 400
+
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO user_locations "
+            "(user_id, label, location_type, country, city, latitude, longitude, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, label, location_type, country, city, latitude, longitude, datetime.now().isoformat(timespec="seconds")),
+        )
+        location_id = cur.lastrowid
+
+    return {"ok": True, "id": location_id}
+
+
+@app.route("/api/konumlar/<int:location_id>", methods=["DELETE"])
+@login_required
+def kullanici_konumu_sil(location_id):
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_locations WHERE id = ? AND user_id = ?",
+            (location_id, current_user_id()),
+        )
+    if cur.rowcount == 0:
+        return {"ok": False, "error": "Konum bulunamadı."}, 404
+    return {"ok": True}
+
+
+@app.route("/api/ev-konumu", methods=["POST"])
+@access_required
 def ev_konumu_guncelle():
     sehir = gorunum_duzelt(request.form.get("sehir", ""))
     if not sehir:
         return {"ok": False, "error": "Geçerli bir şehir girilmelidir."}, 400
 
+    if is_guest():
+        session["guest_home_city"] = sehir
+        return {"ok": True, "home_city": sehir, "guest": True}
+
     user_id = current_user_id()
     with get_db_connection() as conn:
         conn.execute("UPDATE users SET home_city = ? WHERE id = ?", (sehir, user_id))
 
-    return {"ok": True, "home_city": sehir}
+    return {"ok": True, "home_city": sehir, "guest": False}
 
 
 # -----------------------------------------------------------------------------
@@ -688,36 +793,49 @@ def healthz():
 
 
 @app.route("/takip-ekle", methods=["POST"])
-@login_required
+@access_required
 def takip_ekle():
     sehir = gorunum_duzelt(request.form.get("takipSehirInput", ""))
     if sehir:
-        try:
-            with get_db_connection() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO takip_edilen_sehirler (user_id, sehir) VALUES (?, ?)",
-                    (current_user_id(), sehir),
-                )
-        except sqlite3.Error:
-            logger.exception("Takip ekleme hatası")
+        if is_guest():
+            liste = list(session.get("guest_track_list", []))
+            if sehir not in liste:
+                liste.append(sehir)
+            session["guest_track_list"] = liste
+        else:
+            try:
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO takip_edilen_sehirler (user_id, sehir) VALUES (?, ?)",
+                        (current_user_id(), sehir),
+                    )
+            except sqlite3.Error:
+                logger.exception("Takip ekleme hatası")
     return redirect(url_for("index"))
 
 
 @app.route("/takip-sil/<sehir>", methods=["GET"])
-@login_required
+@access_required
 def takip_sil(sehir):
-    try:
-        with get_db_connection() as conn:
-            conn.execute(
-                "DELETE FROM takip_edilen_sehirler WHERE user_id = ? AND sehir = ?",
-                (current_user_id(), gorunum_duzelt(sehir)),
-            )
-    except sqlite3.Error:
-        logger.exception("Takip silme hatası")
+    sehir = gorunum_duzelt(sehir)
+    if is_guest():
+        session["guest_track_list"] = [
+            item for item in session.get("guest_track_list", [])
+            if normalize_text(item) != normalize_text(sehir)
+        ]
+    else:
+        try:
+            with get_db_connection() as conn:
+                conn.execute(
+                    "DELETE FROM takip_edilen_sehirler WHERE user_id = ? AND sehir = ?",
+                    (current_user_id(), sehir),
+                )
+        except sqlite3.Error:
+            logger.exception("Takip silme hatası")
     return redirect(url_for("index"))
 
 @app.route("/", methods=["GET", "POST"])
-@login_required
+@access_required
 def index():
     tahmin_sonucu = ""
     risk_durumu = ""
@@ -900,40 +1018,23 @@ def index():
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
 
-                try:
-                    conn = sqlite3.connect(db_yolu)
-                    cursor = conn.cursor()
-
-                    cursor.execute("""
-                        INSERT INTO analiz_kayitlari (
-                            user_id,
-                            sehir,
-                            ilce,
-                            mahalle,
-                            risk_sonucu,
-                            risk_skoru,
-                            zemin_riski,
-                            tarih
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        current_user_id(),
-                        secilen_sehir,
-                        secilen_ilce,
-                        secilen_mahalle,
-                        risk_durumu,
-                        risk_skoru,
-                        zemin_riski,
-                        datetime.now().strftime("%d.%m.%Y %H:%M")
-                    ))
-
-                    conn.commit()
-                    conn.close()
-
-                    logger.info("Analiz veritabanına kaydedildi.")
-
-                except Exception as db_hata:
-                    logger.exception("Veritabanı kayıt hatası")
+                if not is_guest():
+                    try:
+                        with get_db_connection() as conn:
+                            conn.execute("""
+                                INSERT INTO analiz_kayitlari (
+                                    user_id, sehir, ilce, mahalle, risk_sonucu,
+                                    risk_skoru, zemin_riski, tarih
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                current_user_id(), secilen_sehir, secilen_ilce,
+                                secilen_mahalle, risk_durumu, risk_skoru,
+                                zemin_riski, datetime.now().strftime("%d.%m.%Y %H:%M")
+                            ))
+                        logger.info("Analiz veritabanına kaydedildi.")
+                    except sqlite3.Error:
+                        logger.exception("Analiz veritabanı kayıt hatası")
 
                 if hasattr(model, "feature_importances_"):
                     imp = model.feature_importances_
@@ -964,32 +1065,32 @@ def index():
             tahmin_sonucu = "Veri hatası!"
             logger.exception("Model yükleme/tahmin hatası")
 
-    if os.path.exists(db_yolu):
-        try:
-            conn = sqlite3.connect(db_yolu)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari "
-                "WHERE user_id = ? ORDER BY id DESC LIMIT 5",
-                (current_user_id(),),
-            )
-            son_analizler_listesi = cursor.fetchall()
+    if is_guest():
+        takip_listesi_json = json.dumps(session.get("guest_track_list", []), ensure_ascii=False)
+        user_home_city = gorunum_duzelt(session.get("guest_home_city", ""))
+    else:
+        if os.path.exists(db_yolu):
+            try:
+                with get_db_connection() as conn:
+                    son_analizler_listesi = conn.execute(
+                        "SELECT sehir, ilce, risk_sonucu, tarih FROM analiz_kayitlari "
+                        "WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+                        (current_user_id(),),
+                    ).fetchall()
+                    takip_rows = conn.execute(
+                        "SELECT sehir FROM takip_edilen_sehirler WHERE user_id = ? ORDER BY id DESC",
+                        (current_user_id(),),
+                    ).fetchall()
+                    takip_listesi_json = json.dumps([r[0] for r in takip_rows], ensure_ascii=False)
+            except sqlite3.Error:
+                logger.exception("Veritabanı panel verisi çekme hatası")
 
-            cursor.execute(
-                "SELECT sehir FROM takip_edilen_sehirler WHERE user_id = ? ORDER BY id DESC",
-                (current_user_id(),),
-            )
-            takip_listesi_json = json.dumps([r[0] for r in cursor.fetchall()], ensure_ascii=False)
-            conn.close()
-        except Exception as e:
-            logger.exception("Veritabanı panel verisi çekme hatası")
+        user = current_user()
+        if not user:
+            session.clear()
+            return redirect(url_for("login"))
+        user_home_city = gorunum_duzelt(user["home_city"])
 
-    user = current_user()
-    if not user:
-        session.clear()
-        return redirect(url_for("login"))
-
-    user_home_city = gorunum_duzelt(user["home_city"])
     if not secilen_sehir and user_home_city:
         secilen_sehir = user_home_city
 
@@ -1101,6 +1202,15 @@ def index():
                 📍 {sehir_adi}
                 <a href="/takip-sil/{sehir_adi}" style="color:var(--danger); text-decoration:none; font-weight:extrabold; margin-left:2px;">×</a>
             </span>"""
+
+    home_display_text = (
+        f"Mevcut Ev Konumunuz: {user_home_city} (Hesabınıza Kayıtlı)"
+        if user_home_city and not is_guest()
+        else f"Geçici Ev Konumunuz: {user_home_city}"
+        if user_home_city and is_guest()
+        else "Ev konumunuz henüz belirlenmedi"
+    )
+    access_display = "Misafir Modu — keşif için giriş yaptınız" if is_guest() else "Hesabınıza giriş yapıldı"
 
     html = f"""
     <!DOCTYPE html>
@@ -1751,6 +1861,9 @@ def index():
                     <button type="button" id="voiceToggleButton" class="voice-toggle-btn" onclick="sesliYonlendirmeAyariniDegistir()" aria-label="Sesli yönlendirme ayarını aç veya kapat">
                         🔊 Sesli Yönlendirme: Açık
                     </button>
+                    <button type="button" id="microphoneConsentButton" onclick="sesliKomutIzniIste()" aria-label="Sesli komutlar için mikrofon izni ver">
+                        🎙️ Sesli Komutları Etkinleştir
+                    </button>
                     <button type="button" onclick="detayliAnalizeGec()" aria-label="Detaylı analiz ekranına geç">
                         ⚙️ Analiz Ekranı
                     </button>
@@ -1763,10 +1876,11 @@ def index():
                     <p>
                         Konumunuza göre deprem risklerini analiz eder, size özel uyarılar ve öneriler sunar.
                     </p>
+                    <div class="status-box" aria-live="polite">{access_display}</div>
 
                     <div class="location-symbol" aria-hidden="true">📍</div>
 
-                    <h2 id="anaEvGosterge">Mevcut Ev Konumunuz: Konya (Hafızada Kayıtlı)</h2>
+                    <h2 id="anaEvGosterge">{home_display_text}</h2>
                     <p>
                         4.5 ve üzeri depremlerde sadece bulunduğunuz bölge etkilenebiliyorsa sizi uyarır,
                         uzak depremler için gereksiz alarm vermez.
@@ -2093,6 +2207,7 @@ def index():
             // KALICI HAFIZA VE ROBOT AYARLARI ALTYAPISI
             let aktifEvKonumu = {json.dumps(user_home_city, ensure_ascii=False)};
             let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
+            let mikrofonIzniVarMi = localStorage.getItem("riskAtlasMikrofonIzni") === "acik";
 
             function aiRobotAyariniGuncelle() {{
                 const btn = document.getElementById("aiRobotToggleBtn");
@@ -2112,7 +2227,7 @@ def index():
                 localStorage.setItem("riskAtlasAiRobotAyar", aiRobotAktifMi ? "acik" : "kapali");
                 aiRobotAyariniGuncelle();
                 if(aiRobotAktifMi) {{
-                    robotKonus veSoruSor("Yapay zekâ robotu yeniden aktif hale getirildi. Size yardımcı olmak için dinliyorum.");
+                    robotKonusveSoruSor("Yapay zekâ robotu yeniden aktif hale getirildi. Size yardımcı olmak için dinliyorum.");
                 }}
             }}
 
@@ -2132,7 +2247,7 @@ def index():
                     sehirSelect.value = sehir;
                     ilceleriGuncelle();
                 }}
-                robotKonus veSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak hesabınıza kaydedildi.");
+                robotKonusveSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak hesabınıza kaydedildi.");
             }}
 
             function buSehriTakibeEkle() {{
@@ -2220,6 +2335,31 @@ def index():
                     setTimeout(() => {{
                         window.speechSynthesis.speak(mesaj);
                     }}, 200);
+                }}
+            }}
+
+            async function sesliKomutIzniIste() {{
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
+                    robotKonusveSoruSor("Bu tarayıcı sesli komut özelliğini desteklemiyor.");
+                    return;
+                }}
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
+                    robotKonusveSoruSor("Bu tarayıcı mikrofon iznini desteklemiyor.");
+                    return;
+                }}
+                try {{
+                    robotKonusveSoruSor("Sesli komutları etkinleştirmek için mikrofon izni gerekiyor. Mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken kullanılacaktır.");
+                    const stream = await navigator.mediaDevices.getUserMedia({{audio:true}});
+                    stream.getTracks().forEach(track => track.stop());
+                    localStorage.setItem("riskAtlasMikrofonIzni", "acik");
+                    mikrofonIzniVarMi = true;
+                    const btn = document.getElementById("microphoneConsentButton");
+                    if(btn) btn.textContent = "🎙️ Sesli Komutlar: Açık";
+                    setTimeout(() => otomatikSesliAsistanBaslat(), 350);
+                }} catch (error) {{
+                    localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+                    mikrofonIzniVarMi = false;
+                    robotKonusveSoruSor("Mikrofon izni verilmedi. Sesli yardım çalışmaya devam eder; ancak mikrofon kullanılmaz.");
                 }}
             }}
 
@@ -2317,7 +2457,7 @@ def index():
                     mesaj1.lang = "tr-TR";
                     mesaj1.rate = 0.92;
                     mesaj1.onend = function () {{
-                        otomatikSesliAsistanBaslat();
+                        if (mikrofonIzniVarMi) otomatikSesliAsistanBaslat();
                     }};
                     window.speechSynthesis.speak(mesaj1);
                 }}
@@ -2525,6 +2665,8 @@ def index():
                 seyahatListesiDepremDenetle();
                 sesliYonlendirmeButonunuGuncelle();
                 aiRobotAyariniGuncelle();
+                const micButton = document.getElementById("microphoneConsentButton");
+                if (micButton && mikrofonIzniVarMi) micButton.textContent = "🎙️ Sesli Komutlar: Açık";
 
                 setTimeout(function () {{
                     const splash = document.getElementById("splash-screen");

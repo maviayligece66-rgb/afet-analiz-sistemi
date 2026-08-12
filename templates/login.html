@@ -141,13 +141,21 @@
         <button
             type="button"
             id="voiceLogin"
-            class="voice-button">
+            class="voice-button"
+            aria-describedby="voicePrivacyNote"
+            aria-pressed="false">
 
             <i class="fa-solid fa-microphone" aria-hidden="true"></i>
 
-            Sesli Yardımı Başlat
+            Sesli Yardımı ve Sesli Komutları Etkinleştir
 
         </button>
+
+        <div id="voicePrivacyNote" class="voice-privacy-note" role="status" aria-live="polite">
+            🔒 Mikrofon başlangıçta kullanılmaz. Sesli komutları etkinleştirmeyi seçtiğinizde mikrofon izni ayrıca istenir.
+            İzin verirseniz mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken sesli komutlar için kullanılır.
+            Sesli deprem alarmı bu ayardan bağımsızdır.
+        </div>
 
         <div class="guest-area">
 
@@ -338,9 +346,9 @@
             speak(
                 "Hoş geldiniz, ben RiskAtlas asistanıyım. Giriş ekranındasınız. " +
                 "E posta ve şifrenizle giriş yapabilir, hesap oluşturabilir veya hesap oluşturmadan misafir olarak devam edebilirsiniz. " +
-                "Sesli yardım istemiyorsanız istemiyorum demeniz yeterli. " +
-                "Sesli komutları kullanmak isterseniz Sesli Yardımı Başlat düğmesini seçmeniz gerekir. " +
-                "Mikrofon yalnızca RiskAtlas sitesi açık ve kullanımdayken sesli komutlar için kullanılacaktır."
+                "Mikrofon başlangıçta kullanılmaz. Sesli komutları kullanmak isterseniz Sesli Yardımı ve Sesli Komutları Etkinleştir düğmesini seçmeniz gerekir. " +
+                "Mikrofon iznini verdiğinizde yalnızca RiskAtlas sitesi açık ve kullanımdayken sesli komutlar için kullanılır. " +
+                "Mikrofonu kullanmak istemiyorsanız izin vermemeniz yeterlidir. Sesli deprem alarmı bu ayardan bağımsızdır."
             );
         }, 250);
     });

@@ -1,3 +1,6 @@
+
+
+
 import json
 import logging
 import os
@@ -2245,14 +2248,6 @@ def index():
                 <label for="kisi_sayisi">👥 Evde Kaç Kişi Yaşıyor?</label>
                 <input id="kisi_sayisi" type="number" min="1" max="100" step="1" name="kisi_sayisi" placeholder="Örn: 4" required>
 
-                <label for="erisim_ihtiyaci">♿ Erişilebilirlik İhtiyacı</label>
-                <select id="erisim_ihtiyaci" name="erisim_ihtiyaci">
-                    <option value="yok">Belirtmek istemiyorum / Yok</option>
-                    <option value="gorme">Görme desteği</option>
-                    <option value="isitme">İşitme desteği</option>
-                    <option value="hareket">Hareket desteği</option>
-                </select>
-
                 <label for="evcil_hayvan">🐾 Evcil Hayvanınız Var mı?</label>
                 <select id="evcil_hayvan" name="evcil_hayvan">
                     <option value="hayir">Hayır</option>
@@ -2274,7 +2269,6 @@ def index():
                 • Bina yaşınızı yaklaşık olarak bilmeniz yeterlidir.<br>
                 • Binanızın toplam kat sayısını ve bulunduğunuz katı girin.<br>
                 • Evde yaşayan kişi sayısını belirtin.<br>
-                • İsterseniz erişilebilirlik ihtiyacınızı ve evcil hayvan bilgisini ekleyin.<br>
                 • Nüfus, hastane, itfaiye, toplanma alanı ve zemin gibi teknik değerleri sizin araştırmanız gerekmez.
             </div>
 

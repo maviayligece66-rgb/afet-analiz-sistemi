@@ -17,7 +17,7 @@ import folium
 import joblib
 import pandas as pd
 import requests
-from flask import Flask, flash, make_response, redirect, render_template, request, session, url_for
+from flask import Flask, flash, make_response, redirect, render_template, render_template_string, request, session, url_for
 
 
 # -----------------------------------------------------------------------------
@@ -771,6 +771,54 @@ def sehirleri_renklendir(m: folium.Map, secilen_sehir: str, risk_skoru: int, ris
 def healthz():
     return "OK", 200
 
+LOGIN_PAGE_HTML = r"""<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giriş Yap | RiskAtlas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+<div class="login-container">
+    <div class="login-card">
+        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="RiskAtlas Logo" class="login-logo">
+        <h1>RiskAtlas</h1>
+        <p class="subtitle">Yapay Zekâ Destekli Deprem Analiz ve Erken Uyarı Sistemi</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="email"><i class="fa-solid fa-envelope"></i> E-Posta</label>
+                <input id="email" name="email" type="email" placeholder="ornek@mail.com" autocomplete="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password"><i class="fa-solid fa-lock"></i> Şifre</label>
+                <input id="password" name="password" type="password" placeholder="Şifrenizi giriniz" autocomplete="current-password" required>
+            </div>
+            <div class="remember-row">
+                <label><input type="checkbox" name="remember"> Beni Hatırla</label>
+            </div>
+            <button type="submit" class="btn-login"><i class="fa-solid fa-right-to-bracket"></i> Giriş Yap</button>
+        </form>
+        <div class="divider">veya</div>
+        <a href="{{ url_for('register') }}" class="register-link"><i class="fa-solid fa-user-plus"></i> Hesabınız yok mu? Hesap Oluştur</a>
+        <button id="voiceLogin" class="voice-button"><i class="fa-solid fa-microphone"></i> Sesli Yardımı Başlat</button>
+        <div class="guest-area">
+            <a href="{{ url_for('guest_login') }}" class="guest-link">Misafir Olarak Devam Et</a>
+        </div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
+</body>
+</html>"""
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if aktif_kullanici_id() is not None or misafir_mi():
@@ -780,13 +828,13 @@ def login():
         password = request.form.get("password", "")
         if not email or not password:
             flash("E-posta ve şifre alanları zorunludur.", "error")
-            return render_template("login.html")
+            return render_template_string(LOGIN_PAGE_HTML)
         try:
             with get_db_connection() as conn:
                 user = conn.execute("SELECT * FROM kullanicilar WHERE email=?", (email,)).fetchone()
             if not user or not check_password_hash(user["password_hash"], password):
                 flash("E-posta veya şifre hatalı.", "error")
-                return render_template("login.html")
+                return render_template_string(LOGIN_PAGE_HTML)
             session.clear()
             session.permanent = bool(request.form.get("remember"))
             session["user_id"] = int(user["id"])
@@ -799,7 +847,7 @@ def login():
         except sqlite3.Error:
             logger.exception("Giriş sırasında veritabanı hatası")
             flash("Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.", "error")
-    return render_template("login.html")
+    return render_template_string(LOGIN_PAGE_HTML)
 
 @app.route("/guest-login")
 def guest_login():
@@ -2245,6 +2293,14 @@ def index():
                 <label for="kisi_sayisi">👥 Evde Kaç Kişi Yaşıyor?</label>
                 <input id="kisi_sayisi" type="number" min="1" max="100" step="1" name="kisi_sayisi" placeholder="Örn: 4" required>
 
+                <label for="erisim_ihtiyaci">♿ Erişilebilirlik İhtiyacı</label>
+                <select id="erisim_ihtiyaci" name="erisim_ihtiyaci">
+                    <option value="yok">Belirtmek istemiyorum / Yok</option>
+                    <option value="gorme">Görme desteği</option>
+                    <option value="isitme">İşitme desteği</option>
+                    <option value="hareket">Hareket desteği</option>
+                </select>
+
                 <label for="evcil_hayvan">🐾 Evcil Hayvanınız Var mı?</label>
                 <select id="evcil_hayvan" name="evcil_hayvan">
                     <option value="hayir">Hayır</option>
@@ -2266,6 +2322,7 @@ def index():
                 • Bina yaşınızı yaklaşık olarak bilmeniz yeterlidir.<br>
                 • Binanızın toplam kat sayısını ve bulunduğunuz katı girin.<br>
                 • Evde yaşayan kişi sayısını belirtin.<br>
+                • İsterseniz erişilebilirlik ihtiyacınızı ve evcil hayvan bilgisini ekleyin.<br>
                 • Nüfus, hastane, itfaiye, toplanma alanı ve zemin gibi teknik değerleri sizin araştırmanız gerekmez.
             </div>
 

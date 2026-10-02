@@ -1050,6 +1050,13 @@ def hesap():
 @app.route("/", methods=["GET", "POST"])
 @erisim_gerekli
 def index():
+    # Misafir oturumunu analiz POST/GET geçişlerinde canlı tut.
+    # Misafir kullanıcı analiz yaptıktan sonra yeniden giriş ekranına düşmemeli.
+    if aktif_kullanici_id() is None and session.get("guest_mode"):
+        session.permanent = True
+        session["guest_mode"] = True
+        session.modified = True
+
     tahmin_sonucu = ""
     risk_durumu = ""
     risk_rengi = "#2ecc71"
@@ -1172,6 +1179,12 @@ def index():
         deprem_ozeti = "Son 4+ büyüklüğünde deprem bulunamadı."
 
     if request.method == "POST":
+        # Analiz formu misafir oturumunda gönderildiyse oturumu açıkça koru.
+        # Bu alan yetki sağlamaz; yalnızca misafir erişiminin devamını belirtir.
+        if aktif_kullanici_id() is None and request.form.get("guest_session") == "1":
+            session.permanent = True
+            session["guest_mode"] = True
+            session.modified = True
         analiz_yapildi = True
         try:
             secilen_sehir = gorunum_duzelt(request.form.get("sehir", ""))
@@ -2073,11 +2086,8 @@ def index():
                     <button type="button" onclick="location.href='/gecmis'" aria-label="Tüm veritabanı analiz geçmişini gör">
                         📋 Geçmiş Analizler
                     </button>
-                    <button type="button" id="aiRobotToggleBtn" onclick="aiRobotAyariniDegistir()" style="background:rgba(128,0,128,0.22); border:1px solid purple;">
-                        🤖 Yapay Zekâ Robotu: Açık
-                    </button>
-                    <button type="button" onclick="girisSesliAciklama('manual')" aria-label="Erişilebilir sesli rehberi başlat">
-                        ♿ Erişilebilir Sesli Rehber
+                    <button type="button" onclick="sesliYardimAcikMi() ? asistanDinlemeyiBaslat() : sesliYardimiEtkinlestir()" aria-label="Sesli yardımı başlat">
+                        ♿ Sesli Yardım
                     </button>
                     <button type="button" id="voiceToggleButton" class="voice-toggle-btn" onclick="sesliYonlendirmeAyariniDegistir()" aria-label="Sesli yönlendirme ayarını aç veya kapat">
                         🔊 Sesli Yönlendirme: Açık
@@ -2145,10 +2155,10 @@ def index():
                         <button
                             type="button"
                             class="secondary-btn"
-                            onclick="girisSesliAciklama('manual')"
-                            aria-label="Giriş ekranındaki erişilebilir sesli rehberi başlat"
+                            onclick="sesliYardimAcikMi() ? asistanDinlemeyiBaslat() : sesliYardimiEtkinlestir()"
+                            aria-label="Sesli yardımı başlat"
                         >
-                            ♿ Sesli Rehberi Başlat
+                            ♿ Sesli Yardımı Başlat
                         </button>
                     </div>
 
@@ -2246,17 +2256,12 @@ def index():
         <div class="box">
             {map_html}
 
-            <div class="earthquake-list" aria-label="Canlı deprem listesi">
-                <h3>📋 Tüm Güncel Deprem Listesi</h3>
-                <ul>
-                    {deprem_listesi_html}
-                </ul>
-            </div>
         </div>
 
         <div class="box">
 
             <form method="POST" id="analizFormuElementi">
+                <input type="hidden" name="guest_session" value="1">
 
                 <label for="sehir">Şehir Seçiniz</label>
                 <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
@@ -2296,6 +2301,7 @@ def index():
                     <option value="hayir">Hayır</option>
                     <option value="evet">Evet</option>
                 </select>
+                <small>İsteğe göre seçebilirsiniz. Bu alanı seçmeden de analiz yapabilirsiniz.</small>
 
                 <div class="zemin-info-box">
                     <b>🌍 Bölgesel Veriler:</b><br>
@@ -2360,11 +2366,19 @@ def index():
             </div>
             ''' if oneriler else ""}
 
+            <div class="earthquake-list" aria-label="Canlı deprem listesi" style="margin-top:28px;">
+                <h3>📋 Tüm Güncel Deprem Listesi</h3>
+                <p style="color:var(--muted);">4.0'ın altındaki depremler dahil güncel liste burada gösterilir.</p>
+                <ul>
+                    {deprem_listesi_html}
+                </ul>
+            </div>
+
             <div class="accessibility-note">
                 <strong>♿ Erişilebilir Afet Modu:</strong><br><br>
                 ✅ İşitme engelli bireyler için kırmızı yanıp sönen tam ekran görsel alarm ve mobil ritmik güçlü titreşim desenleri (Vibration API)<br>
                 ✅ Mobil cihazlarda titreşim desteği<br>
-                ✅ Görme engelli bireyler için varsayılan açık gelen, ilk etkileşimde veya sayfa yüklendiği an selamlama bittiğinde otomatik çalışan akıllı eller serbest asistan dinleme yapısı<br>
+                ✅ Görme engelli bireyler için kullanıcı tercihine bağlı sesli yönlendirme ve sesli komut desteği<br>
                 ✅ Harita altında ekran okuyucu uyumlu deprem listesi ve veritabanı tabloları<br>
                 ✅ Risk sonucuna göre renklendirilen şehir haritası<br>
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı ve zihinsel engelli bireyler için evrensel sembol tasarımı
@@ -2395,29 +2409,208 @@ def index():
 
             let girisRehberiEtkilesimleBasladi = false;
 
-            // KALICI HAFIZA VE ROBOT AYARLARI ALTYAPISI
+            // ------------------------------------------------------------------
+            // SESLİ YARDIM / MİKROFON SİSTEMİ
+            // Kullanıcı tercihi açıkça alınır. Eski localStorage anahtarları
+            // kullanıcıyı istemeden kalıcı olarak kapalı bırakmaz.
+            // ------------------------------------------------------------------
             let aktifEvKonumu = {json.dumps(aktif_ana_konum, ensure_ascii=False)};
-            let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") === "acik" || localStorage.getItem("riskAtlasMikrofonIzni") === "acik";
+            let sesliRecognition = null;
+            let asistanDinliyor = false;
+            let sesliYardimBaslangicSorusuGosterildi = false;
 
-            function aiRobotAyariniGuncelle() {{
-                const btn = document.getElementById("aiRobotToggleBtn");
-                if(!btn) return;
-                if(aiRobotAktifMi) {{
-                    btn.textContent = "🤖 Yapay Zekâ Robotu: Açık";
-                    btn.style.background = "rgba(128,0,128,0.22)";
+            function sesliYardimTercihi() {{
+                return localStorage.getItem("riskAtlasSesliYardimTercihi") || "";
+            }}
+
+            function sesliYardimAcikMi() {{
+                return sesliYardimTercihi() === "evet";
+            }}
+
+            function robotKonus(metin) {{
+                if (!sesliYardimAcikMi()) return;
+                if (!('speechSynthesis' in window)) return;
+                const mesaj = new SpeechSynthesisUtterance(metin);
+                mesaj.lang = "tr-TR";
+                mesaj.rate = 0.92;
+                window.speechSynthesis.cancel();
+                setTimeout(() => window.speechSynthesis.speak(mesaj), 100);
+            }}
+
+            function sesliYardimDurumunuGuncelle() {{
+                const btn = document.getElementById("voiceToggleButton");
+                if (!btn) return;
+                if (sesliYardimAcikMi()) {{
+                    btn.textContent = "🔊 Sesli Yardım: Açık";
+                    btn.classList.remove("off");
+                    btn.setAttribute("aria-label", "Sesli yardım açık. Kapatmak için dokunun.");
                 }} else {{
-                    btn.textContent = "🤖 Yapay Zekâ Robotu: Kapalı";
-                    btn.style.background = "rgba(255,255,255,0.10)";
-                    window.speechSynthesis.cancel();
+                    btn.textContent = "🔇 Sesli Yardım: Kapalı";
+                    btn.classList.add("off");
+                    btn.setAttribute("aria-label", "Sesli yardım kapalı. Açmak için dokunun.");
                 }}
             }}
 
-            function aiRobotAyariniDegistir() {{
-                aiRobotAktifMi = !aiRobotAktifMi;
-                localStorage.setItem("riskAtlasAiRobotAyar", aiRobotAktifMi ? "acik" : "kapali");
-                aiRobotAyariniGuncelle();
-                if(aiRobotAktifMi) {{
-                    robotKonusveSoruSor("Yapay zekâ robotu yeniden aktif hale getirildi. Size yardımcı olmak için dinliyorum.");
+            function sesliYardimPenceresiOlustur() {{
+                if (document.getElementById("sesliYardimTercihPenceresi")) return;
+                const panel = document.createElement("div");
+                panel.id = "sesliYardimTercihPenceresi";
+                panel.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+                panel.innerHTML = `
+                    <div style="max-width:560px;width:100%;background:#0b1b30;color:#eef6ff;border:1px solid rgba(95,177,255,.35);border-radius:20px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.55);text-align:center;">
+                        <div style="font-size:42px;margin-bottom:10px;">🎙️</div>
+                        <h2 style="margin:0 0 12px;">Sesli Yardım</h2>
+                        <p style="line-height:1.6;color:#c8d8e8;">RiskAtlas size sesli olarak yönlendirme yapabilir ve söylediğiniz komutları dinleyebilir.</p>
+                        <p style="line-height:1.6;color:#c8d8e8;"><strong>“İstiyorum”</strong> derseniz mikrofon yalnızca RiskAtlas sitesi açıkken kullanılacaktır. <strong>“İstemiyorum”</strong> seçerseniz mikrofon etkinleştirilmeyecektir.</p>
+                        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:20px;">
+                            <button type="button" id="sesliYardimIsterimBtn" style="min-width:190px;">🎙️ İstiyorum</button>
+                            <button type="button" id="sesliYardimIstemiyorumBtn" class="secondary-btn" style="min-width:190px;">🔇 İstemiyorum</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(panel);
+                document.getElementById("sesliYardimIsterimBtn").onclick = async function() {{
+                    await sesliYardimiEtkinlestir();
+                    panel.remove();
+                }};
+                document.getElementById("sesliYardimIstemiyorumBtn").onclick = function() {{
+                    sesliYardimiKapat(true);
+                    panel.remove();
+                }};
+            }}
+
+            function sesliYardimiKapat(kullaniciTercihi = true) {{
+                localStorage.setItem("riskAtlasSesliYardimTercihi", "hayir");
+                localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+                localStorage.setItem("riskAtlasAiRobotAyar", "kapali");
+                asistanDinliyor = false;
+                if (sesliRecognition) {{
+                    try {{ sesliRecognition.onend = null; sesliRecognition.stop(); }} catch(e) {{}}
+                    sesliRecognition = null;
+                }}
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                sesliYardimDurumunuGuncelle();
+            }}
+
+            async function sesliYardimiEtkinlestir() {{
+                localStorage.setItem("riskAtlasSesliYardimTercihi", "evet");
+                localStorage.setItem("riskAtlasAiRobotAyar", "acik");
+                try {{
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {{
+                        const stream = await navigator.mediaDevices.getUserMedia({{audio:true}});
+                        stream.getTracks().forEach(track => track.stop());
+                        localStorage.setItem("riskAtlasMikrofonIzni", "acik");
+                    }}
+                }} catch (e) {{
+                    localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+                    robotKonus("Mikrofon izni alınamadı. Sesli yardım konuşma özelliğini kullanabilmek için tarayıcıdan mikrofon izni vermeniz gerekir.");
+                    sesliYardimDurumunuGuncelle();
+                    return;
+                }}
+                sesliYardimDurumunuGuncelle();
+                robotKonus("Sesli yardım etkinleştirildi. Mikrofon yalnızca RiskAtlas sitesi açıkken kullanılacaktır. Size nasıl yardımcı olabilirim?");
+                setTimeout(() => asistanDinlemeyiBaslat(), 1200);
+            }}
+
+            function sesliYonlendirmeAyariniDegistir() {{
+                if (sesliYardimAcikMi()) {{
+                    sesliYardimiKapat(true);
+                }} else {{
+                    sesliYardimiEtkinlestir();
+                }}
+            }}
+
+            function robotKonusveSoruSor(metin, soruMu = false) {{
+                robotKonus(metin);
+                if (soruMu && sesliYardimAcikMi()) setTimeout(() => asistanDinlemeyiBaslat(), 1200);
+            }}
+
+            function asistanCevapVer(metin) {{
+                robotKonus(metin);
+            }}
+
+            function asistanDinlemeyiBaslat() {{
+                if (!sesliYardimAcikMi()) return;
+                if (asistanDinliyor) return;
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
+                    asistanCevapVer("Bu tarayıcı sesli komutları desteklemiyor. Chrome veya destekleyen bir tarayıcı kullanabilirsiniz.");
+                    return;
+                }}
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'tr-TR';
+                sesliRecognition = recognition;
+                asistanDinliyor = true;
+
+                recognition.onresult = function(event) {{
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {{
+                        if (!event.results[i].isFinal) continue;
+                        const komut = event.results[i][0].transcript.trim().toLowerCase();
+                        if (!komut) continue;
+                        console.log("RiskAtlas sesli komut:", komut);
+
+                        if (komut.includes("sesli yardımı kapat") || komut.includes("sesli yardımı kapat")) {{
+                            sesliYardimiKapat(true);
+                            return;
+                        }}
+                        if (komut.includes("analiz ekranı") || komut.includes("formu aç")) {{
+                            sehirSecerekDevamEt();
+                            asistanCevapVer("Analiz ekranını açtım.");
+                            continue;
+                        }}
+                        if (komut.includes("analiz et") || komut.includes("hesapla")) {{
+                            const form = document.getElementById("analizFormuElementi");
+                            if (form) {{
+                                form.requestSubmit ? form.requestSubmit() : form.submit();
+                                asistanCevapVer("Analizi başlatıyorum.");
+                            }}
+                            continue;
+                        }}
+                        if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat") || komut.includes("sustur")) {{
+                            acilDurumKapat();
+                            asistanCevapVer("Uyarıyı kapattım.");
+                            continue;
+                        }}
+                        if (komut.includes("yardım") || komut.includes("ne yapabilirsin") || komut.includes("neredeyim")) {{
+                            asistanCevapVer("Analiz ekranını açabilir, analiz başlatabilir, ana konumunuzu değiştirebilir ve deprem uyarılarını yönetmenize yardımcı olabilirim.");
+                            continue;
+                        }}
+                        if (komut.includes("merhaba") || komut.includes("selam")) {{
+                            asistanCevapVer("Merhaba. Size yardımcı olmak için buradayım. Ne yapmak istersiniz?");
+                            continue;
+                        }}
+                        asistanCevapVer("Söylediğinizi tam anlayamadım. Analiz ekranı, analiz et veya yardım diyebilirsiniz.");
+                    }}
+                }};
+
+                recognition.onerror = function(event) {{
+                    console.log("Ses tanıma hatası:", event.error);
+                    if (event.error === "not-allowed" || event.error === "service-not-allowed") {{
+                        localStorage.setItem("riskAtlasMikrofonIzni", "kapali");
+                        asistanDinliyor = false;
+                        asistanCevapVer("Mikrofon izni verilmedi. İsterseniz tarayıcı ayarlarından RiskAtlas için mikrofon iznini açabilirsiniz.");
+                    }}
+                }};
+
+                recognition.onend = function() {{
+                    asistanDinliyor = false;
+                    if (sesliYardimAcikMi() && document.visibilityState === "visible") {{
+                        setTimeout(() => asistanDinlemeyiBaslat(), 500);
+                    }}
+                }};
+
+                try {{ recognition.start(); }} catch (e) {{
+                    asistanDinliyor = false;
+                    console.log("Ses tanıma başlatılamadı:", e);
+                }}
+            }}
+
+            function asistanDinlemeyiDurdur() {{
+                asistanDinliyor = false;
+                if (sesliRecognition) {{
+                    try {{ sesliRecognition.onend = null; sesliRecognition.stop(); }} catch(e) {{}}
+                    sesliRecognition = null;
                 }}
             }}
 
@@ -2427,13 +2620,12 @@ def index():
                 localStorage.setItem("riskAtlasAnaEvKonumu", sehir);
                 const gosterge = document.getElementById("anaEvGosterge");
                 if(gosterge) gosterge.textContent = "Mevcut Ev Konumunuz: " + sehir + " (Hafızada Kayıtlı)";
-                
                 const sehirSelect = document.getElementById("sehir");
                 if(sehirSelect) {{
                     sehirSelect.value = sehir;
                     ilceleriGuncelle();
                 }}
-                robotKonusveSoruSor("Ana ev konumunuz başarıyla " + sehir + " olarak güncellendi ve kalıcı hafızaya alındı.");
+                robotKonus("Ana ev konumunuz " + sehir + " olarak güncellendi.");
             }}
 
             function konumTipiniSecVeKaydet(tip) {{
@@ -2442,213 +2634,14 @@ def index():
                 const hidden = document.getElementById("takipSehirInput");
                 const tipInput = document.getElementById("konumTipiInput");
                 const city = (text && text.value.trim()) || (select && select.value) || "";
-                if (!city) {{
-                    alert("Lütfen önce bir şehir veya ülke seçin/yazın.");
-                    return;
-                }}
+                if (!city) {{ alert("Lütfen önce bir şehir veya ülke seçin/yazın."); return; }}
                 if (hidden) hidden.value = city;
                 if (tipInput) tipInput.value = tip;
-                if (tip === "ana") {{
-                    const form = document.getElementById("konumKayitFormu");
-                    if (form) form.submit();
-                }} else {{
-                    const form = document.getElementById("konumKayitFormu");
-                    if (form) form.submit();
-                }}
+                const form = document.getElementById("konumKayitFormu");
+                if (form) form.submit();
             }}
 
-            function buSehriTakibeEkle() {{
-                konumTipiniSecVeKaydet('ek');
-            }}
-
-            function robotKonus(metin) {{
-                if (!aiRobotAktifMi) return;
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(metin);
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.92;
-                    window.speechSynthesis.cancel();
-                    setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
-                }}
-            }}
-
-            function robotKonusveSoruSor(metin, soruMu = false) {{
-                if (!aiRobotAktifMi) return;
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(metin);
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.92;
-                    window.speechSynthesis.cancel();
-                    mesaj.onend = function() {{
-                        if(soruMu) {{
-                            console.log("Robot soru sordu, dinleme modu tetikleniyor...");
-                        }}
-                    }};
-                    setTimeout(() => {{ window.speechSynthesis.speak(mesaj); }}, 150);
-                }}
-            }}
-
-            function sesliYonlendirmeAcikMi() {{
-                return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali";
-            }}
-
-            function sesliYonlendirmeButonunuGuncelle() {{
-                const btn = document.getElementById("voiceToggleButton");
-
-                if (!btn) {{
-                    return;
-                }}
-
-                if (sesliYonlendirmeAcikMi()) {{
-                    btn.textContent = "🔊 Sesli Yönlendirme: Açık";
-                    btn.classList.remove("off");
-                    btn.setAttribute("aria-label", "Sesli yönlendirme açık. Kapatmak için dokunun.");
-                }} else {{
-                    btn.textContent = "🔇 Sesli Yönlendirme: Kapalı";
-                    btn.classList.add("off");
-                    btn.setAttribute("aria-label", "Sesli yönlendirme kapalı. Açmak için dokunun.");
-                }}
-            }}
-
-            function sesliYonlendirmeAyariniDegistir() {{
-                if (sesliYonlendirmeAcikMi()) {{
-                    localStorage.setItem("riskatlasSesliYonlendirme", "kapali");
-
-                    if ("speechSynthesis" in window) {{
-                        window.speechSynthesis.cancel();
-                    }}
-                }} else {{
-                    localStorage.setItem("riskatlasSesliYonlendirme", "acik");
-                    setTimeout(() => {{
-                        girisSesliAciklama('manual');
-                    }}, 300);
-                }}
-
-                sesliYonlendirmeButonunuGuncelle();
-            }}
-
-            function sesliBilgi(metin) {{
-                if (!sesliYonlendirmeAcikMi()) {{
-                    return;
-                }}
-
-                if ("speechSynthesis" in window) {{
-                    const mesaj = new SpeechSynthesisUtterance(metin);
-                    mesaj.lang = "tr-TR";
-                    mesaj.rate = 0.9;
-                    mesaj.pitch = 1;
-                    window.speechSynthesis.cancel();
-                    setTimeout(() => {{
-                        window.speechSynthesis.speak(mesaj);
-                    }}, 200);
-                }}
-            }}
-
-            // INTERAKTİF SESLİ ASİSTAN VE YAPAY ZEKÂ ROBOTU (MİKROFON MOTORU)
-            function otomatikSesliAsistanBaslat() {{
-                if (!aiRobotAktifMi) return;
-                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
-                    console.log("Tarayıcınız ses tanıma desteği sunmuyor.");
-                    return;
-                }}
-
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                const recognition = new SpeechRecognition();
-                recognition.continuous = true;
-                recognition.interimResults = false;
-                recognition.lang = 'tr-TR';
-
-                recognition.onresult = function(event) {{
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {{
-                        if (event.results[i].isFinal) {{
-                            const komut = event.results[i][0].transcript.trim().toLowerCase();
-                            console.log("Yapay Zekâ Algıladı:", komut);
-
-                            if (komut.includes("analiz ekranı") || komut.includes("formu aç")) {{
-                                sehirSecerekDevamEt();
-                            }} else if (komut.includes("uyarıyı kapat") || komut.includes("alarmı kapat") || komut.includes("sustur")) {{
-                                acilDurumKapat();
-                            }} else if (komut.includes("analiz et") || komut.includes("hesapla")) {{
-                                document.getElementById("analizFormuElementi").submit();
-                            }} else if (komut.includes("evimi") || komut.includes("ana konumumu")) {{
-                                let sehirBul = komut.replace("evimi", "").replace("ana konumumu", "").replace("yap", "").trim();
-                                if(sehirBul) {{
-                                    let sehirDüzgün = sehirBul.charAt(0).toUpperCase() + sehirBul.slice(1);
-                                    evKonumunuGuncelle(sehirDüzgün);
-                                }}
-                            }} else if (komut.includes("yardım et") || komut.includes("neredeyim")) {{
-                                robotKonusveSoruSor("Şu anda giriş ekranındasınız. Hafızadaki ev konumunuz " + aktifEvKonumu + " olarak ayarlanmıştır. Başka bir işlem yapmak ister misiniz?", true);
-                            }}
-                        }}
-                    }}
-                }};
-
-                recognition.onend = function() {{
-                    if (aiRobotAktifMi) {{
-                        try {{ recognition.start(); }} catch(e) {{}}
-                    }}
-                }};
-
-                try {{
-                    recognition.start();
-                }} catch(e) {{}}
-            }}
-
-            function seyahatListesiDepremDenetle() {{
-                if (!pythonTakipListesi || pythonTakipListesi.length === 0) return;
-                
-                depremVerileri.forEach(function(d) {{
-                    const mag = parseFloat(d.mag || 0);
-                    const titleFix = d.title ? d.title.toLowerCase() : "";
-                    
-                    if (mag >= 4.5) {{
-                        pythonTakipListesi.forEach(function(takipSehir) {{
-                            const normTakip = takipSehir.toLowerCase();
-                            if (titleFix.includes(normTakip)) {{
-                                const uyariMetni = "Dikkat! Seyahat listenizdeki " + takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
-                                document.getElementById("alertMainParagraph").innerText = uyariMetni;
-                                
-                                if (navigator.vibrate) {{
-                                    navigator.vibrate([400, 200, 400, 200, 800, 200, 400]);
-                                }}
-                                
-                                document.getElementById("emergencyAlert").style.display = "block";
-                                robotKonus(uyariMetni);
-                            }}
-                        }});
-                    }}
-                }});
-            }}
-
-            function girisSesliAciklama(kaynak) {{
-                if (!aiRobotAktifMi) return;
-                if (kaynak === 'manual' || kaynak === 'firstInteraction') {{
-                    girisRehberiEtkilesimleBasladi = true;
-                }}
-
-                const metin =
-                    "RiskAtlas interaktif yapay zekâ sesli asistan sistemine hoş geldiniz. " +
-                    "Uygulama hafızası etkindir. Şu anda ev konumunuz kalıcı olarak " + aktifEvKonumu + " şeklinde ayarlanmıştır. " +
-                    "Her girişte form doldurmak zorunda kalmazsınız. Seyahat listenizdeki ek şehirlerde risk algılandığında sistem sizi sesle uyaracaktır. " +
-                    "Sesli robotumuz sizi dinlemektedir, bana komut verebilir veya soru sorabilirsiniz.";
-
-                if ("speechSynthesis" in window) {{
-                    window.speechSynthesis.cancel();
-                    const mesaj1 = new SpeechSynthesisUtterance(metin);
-                    mesaj1.lang = "tr-TR";
-                    mesaj1.rate = 0.92;
-                    mesaj1.onend = function () {{
-                        otomatikSesliAsistanBaslat();
-                    }};
-                    window.speechSynthesis.speak(mesaj1);
-                }}
-            }}
-
-            function ilkEtkilesimdeSesliRehberiBaslat() {{
-                if (!aiRobotAktifMi) return;
-                if (girisRehberiEtkilesimleBasladi) return;
-                girisSesliAciklama('firstInteraction');
-            }}
+            function buSehriTakibeEkle() {{ konumTipiniSecVeKaydet('ek'); }}
 
             function sehirSecerekDevamEt() {{
                 detayliAnalizeGec();
@@ -2844,8 +2837,7 @@ def index():
                 }}
 
                 seyahatListesiDepremDenetle();
-                sesliYonlendirmeButonunuGuncelle();
-                aiRobotAyariniGuncelle();
+                sesliYardimDurumunuGuncelle();
 
                 setTimeout(function () {{
                     const splash = document.getElementById("splash-screen");
@@ -2855,11 +2847,27 @@ def index():
                     }}
                 }}, 1800);
 
-                // Sesli yardım giriş ekranında açıkça etkinleştirildiyse devam eder.
-                // Ana sayfa kendi kendine mikrofon açmaz.
-                if (aiRobotAktifMi && localStorage.getItem("riskAtlasMikrofonIzni") === "acik") {{
-                    setTimeout(() => {{ girisSesliAciklama('auto'); }}, 900);
+                // İlk ziyarette kullanıcıya sesli yardım tercihi sorulur.
+                // Eski "kapalı" kayıtları yeni sistemi otomatik olarak kapatmaz.
+                const tercih = sesliYardimTercihi();
+                if (!tercih) {{
+                    setTimeout(() => {{
+                        sesliYardimBaslangicSorusuGosterildi = true;
+                        sesliYardimPenceresiOlustur();
+                        if ("speechSynthesis" in window) {{
+                            const soru = new SpeechSynthesisUtterance("RiskAtlas sesli yardım özelliğini kullanmak ister misiniz? İstiyorum seçerseniz mikrofon yalnızca RiskAtlas sitesi açıkken kullanılacaktır. İstemiyorum seçerseniz mikrofon etkinleştirilmeyecektir.");
+                            soru.lang = "tr-TR";
+                            soru.rate = 0.9;
+                            window.speechSynthesis.speak(soru);
+                        }}
+                    }}, 900);
+                }} else if (tercih === "evet" && localStorage.getItem("riskAtlasMikrofonIzni") === "acik") {{
+                    setTimeout(() => {{ asistanDinlemeyiBaslat(); }}, 900);
                 }}
+
+                window.addEventListener("beforeunload", function() {{
+                    asistanDinlemeyiDurdur();
+                }});
             }};
         </script>
 

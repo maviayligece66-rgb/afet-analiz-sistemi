@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Giriş Yap | RiskAtlas{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+{% endblock %}
+
+{% block content %}
+
+<div class="login-container">
+
+    <div class="login-card" role="main" aria-labelledby="login-title">
+
+        <img src="{{ url_for('static', filename='images/logo.png') }}"
+             alt="RiskAtlas Logo"
+             class="login-logo">
+
+        <span class="login-logo-fallback" hidden aria-hidden="true">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17h6l3-8 5 15 4-11 2 4h8"/></svg>
+        </span>
+
+        <h1 id="login-title">RiskAtlas</h1>
+
+        <p class="subtitle">
+            Yapay Zekâ Destekli Deprem Analiz ve Erken Uyarı Sistemi
+        </p>
+
+        <div id="jsErrorSummary" class="js-error-summary" role="alert" aria-live="assertive"></div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages-wrapper" role="alert" aria-live="assertive">
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <form id="loginForm" method="POST" action="{{ url_for('login') }}" novalidate autocomplete="on">
+            {% if form and form.csrf_token %}
+                {{ form.csrf_token }}
+            {% elif csrf_token %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% endif %}
+
+            <div class="form-group">
+
+                <label for="email">
+                    <i class="fa-solid fa-envelope" aria-hidden="true"></i>
+                    E-Posta
+                </label>
+
+                <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="ornek@mail.com"
+                    autocomplete="email"
+                    aria-required="true"
+                    aria-describedby="email-error jsErrorSummary"
+                    required>
+
+                <div id="email-error" class="field-error visually-hidden" aria-live="polite"></div>
+
+            </div>
+
+            <div class="form-group">
+
+                <label for="password">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    Şifre
+                </label>
+
+                <div class="password-wrapper">
+                    <input
+                        id="password"
+                        name="password"
+                        type="password"
+                        placeholder="Şifrenizi giriniz"
+                        autocomplete="current-password"
+                        aria-required="true"
+                        aria-describedby="capsLockWarning password-error jsErrorSummary"
+                        required>
+
+                    <button
+                        type="button"
+                        id="togglePassword"
+                        class="toggle-password-btn"
+                        aria-label="Şifreyi göster"
+                        title="Şifreyi Göster/Gizle">
+                        <i class="fa-solid fa-eye-slash" id="togglePasswordIcon" aria-hidden="true"></i>
+                    </button>
+                </div>
+
+                <div id="password-error" class="field-error visually-hidden" aria-live="polite"></div>
+
+                <div id="capsLockWarning" class="caps-lock-warning" role="alert" aria-live="polite">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span><strong>Dikkat:</strong> Caps Lock tuşunuz açık.</span>
+                </div>
+
+            </div>
+
+            <div class="remember-row">
+
+                <label for="remember">
+
+                    <input
+                        type="checkbox"
+                        id="remember"
+                        name="remember"
+                        autocomplete="off">
+
+                    Beni Hatırla
+
+                </label>
+
+            </div>
+
+            <button
+                type="submit"
+                id="submitBtn"
+                class="btn-login">
+
+                <i class="fa-solid fa-right-to-bracket" id="submitIcon" aria-hidden="true"></i>
+
+                <span id="submitBtnText">Giriş Yap</span>
+
+            </button>
+
+        </form>
+
+        <div class="divider">
+            veya
+        </div>
+
+        <a href="{{ url_for('register') }}" class="register-link">
+
+            <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+
+            Hesabınız yok mu? Hesap Oluştur
+
+        </a>
+
+        <button
+            id="voiceLogin"
+            class="voice-button">
+
+            <i class="fa-solid fa-microphone" aria-hidden="true"></i>
+
+            Sesli Yardımı Başlat
+
+        </button>
+
+        <div class="guest-area">
+
+            <a href="{{ url_for('index') }}"
+               class="guest-link">
+
+                Misafir Olarak Devam Et
+
+            </a>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block page_js %}
+<script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}

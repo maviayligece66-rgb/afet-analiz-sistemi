@@ -1,0 +1,651 @@
+/* ==========================================================================
+   RiskAtlas V2 - login.css (yenilenmiş tasarım)
+   Tüm class / id adları korunmuştur (login.html + login.js ile uyumlu).
+   Arka plan: deprem merkez üssü halkaları + sismograf izi (yalnızca CSS).
+   ========================================================================== */
+
+:root {
+    /* Renk paleti */
+    --color-bg-main: #070c18;
+    --color-bg-main-2: #0d1630;
+    --color-bg-card: rgba(18, 26, 46, 0.78);
+    --color-bg-input: #1b2540;
+    --color-bg-input-focus: #1f2a49;
+    --color-line: rgba(148, 170, 210, 0.16);
+    --color-text-main: #f2f5fb;
+    --color-text-muted: #9aa9c6;
+
+    /* Marka ve durum renkleri */
+    --color-primary: #14b8a6;
+    --color-primary-hover: #0e9488;
+    --color-focus-border: #2ec4b6;
+    --color-accent-voice: #7c3aed;
+    --color-accent-voice-hover: #6527d6;
+    --color-link: #3ddc84;
+    --color-link-hover: color-mix(in srgb, var(--color-link) 80%, #ffffff);
+
+    --color-danger-bg: rgba(248, 113, 113, 0.12);
+    --color-danger-border: rgba(248, 113, 113, 0.4);
+    --color-danger-text: #fca5a5;
+    --color-warning-bg: rgba(251, 146, 60, 0.12);
+    --color-warning-border: rgba(251, 146, 60, 0.4);
+    --color-warning-text: #fdba74;
+    --color-success-bg: rgba(61, 220, 132, 0.1);
+    --color-success-border: rgba(61, 220, 132, 0.4);
+    --color-success-text: #86efac;
+    --color-info-bg: rgba(96, 165, 250, 0.12);
+    --color-info-border: rgba(96, 165, 250, 0.4);
+    --color-info-text: #93c5fd;
+
+    /* Boşluk ve yarıçap */
+    --spacing-xs: 6px;
+    --spacing-sm: 8px;
+    --spacing-md: 10px;
+    --spacing-lg: 12px;
+    --spacing-xl: 14px;
+    --spacing-2xl: 16px;
+    --spacing-3xl: 20px;
+    --spacing-4xl: 30px;
+    --spacing-5xl: 40px;
+
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 14px;
+    --radius-xl: 14px;
+    --radius-2xl: 24px;
+
+    /* Tipografi */
+    --font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    --font-size-h1: clamp(1.75rem, 5vw, 2.1rem);
+    --font-size-body: 15px;
+    --font-size-input: 16px;
+    --font-size-btn: 17px;
+    --font-size-voice: 17px;
+    --font-size-small: 14px;
+    --font-weight-bold: 600;
+
+    /* Efektler */
+    --shadow-card: 0 30px 80px -20px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    --transition-default: 0.3s ease;
+    --transition-fast: 0.2s ease;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    color-scheme: dark;
+}
+
+body {
+    min-height: 100vh;
+    font-family: var(--font-family);
+    color: var(--color-text-main);
+    background:
+        radial-gradient(900px 600px at 50% 42%, #14224a 0%, transparent 65%),
+        radial-gradient(500px 400px at 85% 90%, rgba(124, 58, 237, 0.18), transparent 70%),
+        radial-gradient(500px 400px at 10% 100%, rgba(20, 184, 166, 0.14), transparent 70%),
+        linear-gradient(180deg, var(--color-bg-main-2), var(--color-bg-main)) fixed;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---------- Yerleşim + arka plan ---------- */
+.login-container {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: var(--spacing-4xl) var(--spacing-3xl);
+}
+
+/* Merkez üssü halkaları */
+.login-container::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    width: 1100px;
+    height: 1100px;
+    transform: translate(-50%, -50%);
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(circle,
+            transparent 0 190px, rgba(20, 184, 166, 0.2) 190px 191px,
+            transparent 191px 310px, rgba(20, 184, 166, 0.15) 310px 311px,
+            transparent 311px 440px, rgba(124, 58, 237, 0.14) 440px 441px,
+            transparent 441px);
+    animation: atlasPulse 8s ease-in-out infinite;
+}
+
+/* Sismograf izi */
+.login-container::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 8%;
+    height: 120px;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.5;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 120' preserveAspectRatio='none'%3E%3Cpath d='M0 60H120L160 58 190 64 220 50 250 74 280 40 310 82 340 30 370 90 400 52 430 66 470 58H620L680 56 720 70 760 24 800 98 840 44 880 72 920 58H1000 1180L1220 54 1260 68 1300 46 1340 70 1380 58 1440 60' fill='none' stroke='%2314B8A6' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+@keyframes atlasPulse {
+
+    0%,
+    100% {
+        opacity: 0.55;
+        transform: translate(-50%, -50%) scale(0.96);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.04);
+    }
+}
+
+/* ---------- Kart ---------- */
+.login-card {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    padding: var(--spacing-5xl) 36px 32px;
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-card);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    text-align: center;
+}
+
+/* Logo (yüklenemezse .login-logo-fallback görünür) */
+.login-logo {
+    display: block;
+    width: 88px;
+    height: 88px;
+    margin: 0 auto var(--spacing-2xl);
+    object-fit: contain;
+    border-radius: 20px;
+}
+
+.login-logo[hidden],
+.login-logo-fallback[hidden] {
+    display: none;
+}
+
+.login-logo-fallback {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--spacing-2xl);
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--color-primary), #0b7f8f);
+    box-shadow: 0 10px 30px -8px rgba(20, 184, 166, 0.6);
+}
+
+/* Tipografi */
+.login-card h1 {
+    font-size: var(--font-size-h1);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--spacing-md);
+}
+
+.login-card .subtitle {
+    max-width: 34ch;
+    margin: 0 auto var(--spacing-4xl);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-body);
+    line-height: 1.5;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xl);
+    margin: var(--spacing-3xl) 0 var(--spacing-md);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--color-line);
+}
+
+/* ---------- Form ---------- */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: var(--spacing-3xl);
+    text-align: left;
+}
+
+.form-group label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    font-size: var(--font-size-small);
+    font-weight: var(--font-weight-bold);
+    color: #d5ddee;
+}
+
+.form-group label i {
+    width: 16px;
+    text-align: center;
+    color: var(--color-primary);
+}
+
+.form-group input {
+    width: 100%;
+    min-height: 52px;
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    border: 2px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-input);
+    color: var(--color-text-main);
+    font-family: inherit;
+    font-size: var(--font-size-input);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-group input:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-bg-input) 92%, #ffffff);
+}
+
+.form-group input:focus,
+.form-group input:focus-visible {
+    outline: none;
+    border-color: var(--color-focus-border);
+    background: var(--color-bg-input-focus);
+    box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.18);
+}
+
+.form-group input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.form-group input::placeholder {
+    color: #6f7e9c;
+}
+
+/* login.js'in eklediği durum sınıfları */
+.form-group input.is-invalid {
+    border-color: #f87171;
+    box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.15);
+}
+
+.form-group input.is-valid {
+    border-color: rgba(61, 220, 132, 0.45);
+}
+
+.field-error {
+    margin-top: var(--spacing-xs);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--color-danger-text);
+}
+
+.field-error.visually-hidden {
+    display: none;
+}
+
+/* Tarayıcı autofill */
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--color-text-main);
+    -webkit-box-shadow: 0 0 0 1000px var(--color-bg-input) inset;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Beni Hatırla */
+.remember-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: var(--spacing-3xl);
+    text-align: left;
+}
+
+.remember-row label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+}
+
+.remember-row input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--color-bg-input);
+    border: 1px solid var(--color-line);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.remember-row input[type="checkbox"]:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.remember-row input[type="checkbox"]:checked::after {
+    content: "";
+    width: 5px;
+    height: 10px;
+    border: solid #04201d;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.remember-row input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--color-focus-border);
+    outline-offset: 2px;
+}
+
+/* Şifre alanı */
+.password-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.password-wrapper input {
+    padding-right: 52px;
+}
+
+.toggle-password-btn {
+    position: absolute;
+    right: 6px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    background: none;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: var(--font-size-body);
+    transition: color var(--transition-fast);
+}
+
+.toggle-password-btn:hover {
+    color: var(--color-link);
+}
+
+/* ---------- Düğmeler ve bağlantılar ---------- */
+.btn-login,
+#voiceLogin,
+.register-link,
+.guest-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    text-decoration: none;
+    font-family: inherit;
+}
+
+.btn-login,
+#voiceLogin {
+    width: 100%;
+    min-height: 52px;
+    border: none;
+    border-radius: var(--radius-xl);
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--transition-default), box-shadow var(--transition-default), transform 0.15s ease, opacity var(--transition-default);
+}
+
+.btn-login:active:not(:disabled),
+#voiceLogin:active {
+    transform: scale(0.985);
+}
+
+.btn-login {
+    padding: var(--spacing-2xl);
+    background: linear-gradient(180deg, var(--color-primary), var(--color-primary-hover));
+    color: #04201d;
+    font-size: var(--font-size-btn);
+    box-shadow: 0 12px 28px -10px rgba(20, 184, 166, 0.7);
+}
+
+.btn-login:hover:not(:disabled) {
+    box-shadow: 0 14px 34px -8px rgba(20, 184, 166, 0.85);
+}
+
+.btn-login:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.register-link {
+    margin-top: var(--spacing-3xl);
+    color: var(--color-link);
+    font-weight: 600;
+    transition: color var(--transition-fast);
+}
+
+.register-link:hover,
+.guest-link:hover {
+    color: var(--color-link-hover);
+}
+
+#voiceLogin {
+    margin-top: var(--spacing-3xl);
+    padding: var(--spacing-2xl);
+    background: linear-gradient(180deg, var(--color-accent-voice), var(--color-accent-voice-hover));
+    color: var(--color-text-main);
+    font-size: var(--font-size-voice);
+    box-shadow: 0 12px 28px -12px rgba(124, 58, 237, 0.8);
+}
+
+#voiceLogin:hover {
+    box-shadow: 0 14px 34px -10px rgba(124, 58, 237, 0.95);
+}
+
+.guest-area {
+    margin-top: var(--spacing-3xl);
+}
+
+.guest-link {
+    color: var(--color-link);
+    font-weight: 600;
+    transition: color var(--transition-fast);
+}
+
+/* ---------- Uyarılar ---------- */
+.flash-messages-wrapper {
+    margin-bottom: var(--spacing-3xl);
+}
+
+.alert,
+.js-error-summary {
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-lg) var(--spacing-xl);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-small);
+    line-height: 1.5;
+    text-align: left;
+    color: var(--color-text-main);
+}
+
+.alert.danger,
+.alert.error {
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    color: var(--color-danger-text);
+}
+
+.alert.success {
+    background: var(--color-success-bg);
+    border: 1px solid var(--color-success-border);
+    color: var(--color-success-text);
+}
+
+.alert.warning {
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    color: var(--color-warning-text);
+}
+
+.alert.info {
+    background: var(--color-info-bg);
+    border: 1px solid var(--color-info-border);
+    color: var(--color-info-text);
+}
+
+.js-error-summary {
+    display: none;
+    margin-bottom: var(--spacing-3xl);
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    color: var(--color-danger-text);
+}
+
+.js-error-summary.visible {
+    display: block;
+}
+
+/* Caps Lock uyarısı */
+.caps-lock-warning {
+    display: none;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-xl);
+    border-radius: var(--radius-lg);
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    color: var(--color-warning-text);
+    font-size: var(--font-size-small);
+    opacity: 0;
+    transform: translateY(-5px);
+    transition: opacity var(--transition-default), transform var(--transition-default);
+}
+
+.caps-lock-warning.visible {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ---------- Duyarlı tasarım ---------- */
+@media (max-width: 768px) {
+    .login-container {
+        padding: var(--spacing-3xl) var(--spacing-2xl);
+    }
+
+    .login-card {
+        padding: var(--spacing-4xl) var(--spacing-3xl);
+    }
+}
+
+@media (max-width: 576px) {
+    .login-card {
+        border-radius: 20px;
+    }
+}
+
+@media (max-width: 360px) {
+    .login-card h1 {
+        font-size: 1.5rem;
+    }
+
+    .login-logo {
+        width: 72px;
+        height: 72px;
+    }
+}
+
+/* ---------- Erişilebilirlik ---------- */
+.btn-login:focus-visible,
+#voiceLogin:focus-visible,
+.toggle-password-btn:focus-visible {
+    outline: 2px solid var(--color-focus-border);
+    outline-offset: 2px;
+}
+
+.register-link:focus-visible,
+.guest-link:focus-visible {
+    outline: 2px dashed var(--color-focus-border);
+    outline-offset: 4px;
+    border-radius: var(--radius-sm);
+}
+
+@media (forced-colors: active) {
+
+    .form-group input,
+    .btn-login,
+    #voiceLogin {
+        border: 2px solid ButtonText;
+    }
+}
+
+/* ---------- Animasyonlar ---------- */
+.spinner-inline {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinLoginSpinner 0.75s linear infinite;
+    vertical-align: text-bottom;
+}
+
+@keyframes spinLoginSpinner {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    ::before,
+    ::after {
+        animation-delay: -1ms !important;
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        background-attachment: scroll !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+    }
+
+    .spinner-inline {
+        animation: none;
+        border-right-color: currentColor;
+    }
+}

@@ -1,0 +1,304 @@
+/* RiskAtlas ana sayfa – yeni bileşenler (Analiz/Şehir butonları + Hesap paneli) */
+
+/* ---------- Ana butonlar ---------- */
+.landing-actions.cta-group {
+    margin-top: 26px;
+    gap: 14px;
+}
+
+.landing-actions .cta-primary,
+.landing-actions .cta-city {
+    min-width: 250px;
+    padding: 16px 28px;
+    border-radius: 14px;
+    font-size: 19px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform .15s ease, box-shadow .2s ease;
+}
+
+.landing-actions .cta-primary {
+    border: 0;
+    color: #fff;
+    background: linear-gradient(135deg, #2f89ff, #00c2ff);
+    box-shadow: 0 12px 30px -8px rgba(0, 194, 255, .65);
+}
+
+.landing-actions .cta-primary:hover {
+    box-shadow: 0 16px 38px -8px rgba(0, 194, 255, .85);
+    transform: translateY(-1px);
+}
+
+.landing-actions .cta-city {
+    color: #eaf4ff;
+    background: rgba(14, 165, 168, .16);
+    border: 1px solid rgba(14, 165, 168, .6);
+    box-shadow: none;
+}
+
+.landing-actions .cta-city:hover {
+    background: rgba(14, 165, 168, .28);
+}
+
+.landing-actions .cta-primary:active,
+.landing-actions .cta-city:active {
+    transform: scale(.98);
+}
+
+.cta-hint {
+    margin: 10px auto 0;
+    font-size: 14px;
+    color: #a8c5df;
+}
+
+.link-btn {
+    display: block;
+    margin: 14px auto 0;
+    padding: 8px 14px;
+    background: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: #8bd5ff;
+    font-size: 14px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+/* ---------- Hesap paneli ---------- */
+.hesap-arka {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: rgba(2, 8, 20, .62);
+    backdrop-filter: blur(3px);
+}
+
+.hesap-paneli {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    width: min(440px, 100%);
+    overflow-y: auto;
+    padding: 22px 20px 28px;
+    text-align: left;
+    color: #eaf4ff;
+    background: linear-gradient(180deg, #0b1e35, #06111f);
+    border-left: 1px solid rgba(95, 177, 255, .25);
+    box-shadow: -20px 0 60px rgba(0, 0, 0, .5);
+}
+
+.hesap-arka[hidden],
+.hesap-paneli[hidden] {
+    display: none;
+}
+
+.hesap-baslik {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.hesap-baslik h2 {
+    margin: 0;
+    font-size: 22px;
+}
+
+.hesap-paneli .kapat {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 10px;
+    font-size: 18px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, .08);
+    border: 1px solid rgba(95, 177, 255, .25);
+    color: #eaf4ff;
+    box-shadow: none;
+}
+
+.hesap-ayar {
+    display: block;
+    padding: 14px 16px;
+    margin-bottom: 22px;
+    border-radius: 12px;
+    text-align: center;
+    font-weight: 700;
+    text-decoration: none;
+    color: #eaf4ff;
+    background: rgba(95, 177, 255, .10);
+    border: 1px solid rgba(95, 177, 255, .3);
+}
+
+.hesap-ayar:hover {
+    background: rgba(95, 177, 255, .2);
+}
+
+.hesap-paneli h3 {
+    margin: 0 0 6px;
+    font-size: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.hesap-paneli .sayac {
+    font-size: 13px;
+    color: #a8c5df;
+    font-weight: 600;
+}
+
+.hesap-paneli .ipucu {
+    margin: 0 0 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #a8c5df;
+}
+
+.sehir-kutulari {
+    display: grid;
+    gap: 12px;
+}
+
+.sehir-kutu {
+    padding: 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(95, 177, 255, .25);
+}
+
+.sehir-kutu.bos {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    border-style: dashed;
+}
+
+.sehir-kutu.bos>input,
+.sehir-kutu.bos>button {
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box;
+}
+
+.sehir-kutu.dolu.ana {
+    border-color: rgba(61, 220, 132, .55);
+    background: rgba(61, 220, 132, .07);
+}
+
+.sehir-kutu input[type=text] {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 15px;
+    color: #eaf4ff;
+    background: #0b1b30;
+    border: 1px solid rgba(95, 177, 255, .3);
+    box-sizing: border-box;
+}
+
+.sehir-kutu input[type=text]:focus {
+    outline: none;
+    border-color: #00c2ff;
+    box-shadow: 0 0 0 3px rgba(0, 194, 255, .2);
+}
+
+.sehir-kutu.bos button[type=submit] {
+    min-height: 44px;
+    border: 0;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    color: #fff;
+    cursor: pointer;
+    background: linear-gradient(135deg, #0ea5a8, #087f8c);
+}
+
+.sehir-ad {
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.sehir-islem {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.sehir-islem form {
+    margin: 0;
+}
+
+.mini {
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: none;
+    color: #8bd5ff;
+    background: rgba(95, 177, 255, .10);
+    border: 1px solid rgba(95, 177, 255, .3);
+}
+
+.mini.sil {
+    color: #ff8b8b;
+    background: rgba(255, 59, 59, .10);
+    border-color: rgba(255, 59, 59, .35);
+}
+
+.kutu-ekle {
+    width: 100%;
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    color: #eaf4ff;
+    background: transparent;
+    border: 2px dashed rgba(95, 177, 255, .45);
+    box-shadow: none;
+}
+
+.kutu-ekle:hover:not(:disabled) {
+    background: rgba(95, 177, 255, .10);
+}
+
+.kutu-ekle:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.kutu-ekle small {
+    color: #a8c5df;
+    font-weight: 500;
+}
+
+.hesap-paneli button:focus-visible,
+.hesap-paneli a:focus-visible,
+.landing-actions button:focus-visible,
+.link-btn:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+
+    .landing-actions .cta-primary,
+    .landing-actions .cta-city {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .landing-actions button {
+        transition: none;
+    }
+}

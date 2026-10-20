@@ -1,631 +1,677 @@
-<!DOCTYPE html>
-<html lang="tr">
-
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <title>Afet Dirençliliği ve Güvenli Şehir Analizi Sistemi - RiskAtlas</title>
-
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-    <link rel="manifest" href="/static/manifest.json">
-
-    <meta name="theme-color" content="#081120">
-
-    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-
-    <style>
-        #map {
-            height: 420px;
-            border-radius: 20px;
-        }
-
-        #splash-screen {
-            position: fixed;
-            inset: 0;
-            background: #081120;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 99999;
-            transition: opacity .8s ease;
-        }
-
-        #splash-screen.fade-out {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        .splash-image {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        /* İşitme engelliler için flaşör efekti */
-        @keyframes flash-red {
-
-            0%,
-            100% {
-                background-color: rgba(239, 68, 68, 0.2);
-            }
-
-            50% {
-                background-color: rgba(239, 68, 68, 0.7);
-            }
-        }
-
-        .visual-alarm-active {
-            animation: flash-red 0.8s infinite;
-        }
-    </style>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-
-<body class="bg-slate-950 text-white min-h-screen transition-colors duration-300" id="mainBody">
-
-    <div id="splash-screen">
-        <img src="/static/splash/splash.png" class="splash-image" alt="RiskAtlas Açılış Ekranı">
-    </div>
-
-    <header class="p-6 bg-slate-900 shadow-lg relative">
-        <h1 class="text-3xl font-bold text-center">
-            Afet Dirençliliği ve Güvenli Şehir Analizi Sistemi
-        </h1>
-        <p class="text-center text-slate-300 mt-2">
-            Yapay zekâ destekli şehir risk analizi platformu
-        </p>
-
-        <div class="max-w-7xl mx-auto mt-4 flex flex-wrap justify-center gap-3">
-            <button type="button" onclick="girisSesliAciklama('manual')"
-                class="bg-teal-600 hover:bg-teal-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1"
-                aria-label="Erişilebilir sesli rehberi başlat">
-                ♿ Sesli Rehber
-            </button>
-            <button type="button" id="voiceToggleButton" onclick="sesliYonlendirmeAyariniDegistir()"
-                class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm font-bold border border-slate-700"
-                aria-label="Sesli yönlendirme ayarını değiştir">
-                🔊 Sesli Yönlendirme: Açık
-            </button>
-            <button type="button" id="speechAsistanBtn" onclick="otomatikSesliAsistanBaslat()"
-                class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1"
-                aria-label="Akıllı sesli asistanı sürekli dinleme moduna al">
-                🎙️ Akıllı Asistan: Kapalı
-            </button>
-        </div>
-    </header>
-
-    <div id="emergencyAlert"
-        class="hidden fixed inset-0 z-[100000] bg-red-700 text-white flex flex-col items-center justify-center p-6 text-center animate-pulse"
-        role="alertdialog" aria-live="assertive">
-        <h1 class="text-5xl font-extrabold mb-4">🚨 CRITICAL ALARM</h1>
-        <p id="emergencyAlertText" class="text-2xl font-bold mb-6">Takip listenizdeki bir şehirde kritik afet riski
-            tespit edildi!</p>
-        <p class="text-xl mb-6">Güvenli alana geçin. Asansör kullanmayın. En yakın toplanma alanına yönelin.</p>
-        <button onclick="acilDurumKapat()"
-            class="bg-white text-red-700 font-bold text-xl px-8 py-4 rounded-2xl shadow-2xl hover:bg-slate-100">
-            Uyarıyı Kapat / Alarmı Sustur
-        </button>
-    </div>
-
-    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl" role="region" aria-labelledby="formHeading">
-            <h2 id="formHeading" class="text-2xl font-semibold mb-4">Risk Tahmin Formu</h2>
-
-            <div class="space-y-4">
-                <div>
-                    <label for="city" class="block text-sm text-slate-400 mb-1">Şehir Adı</label>
-                    <div class="flex gap-2">
-                        <input id="city"
-                            class="flex-1 p-3 rounded bg-slate-800 border border-slate-700 focus:outline-none focus:border-blue-500 text-white"
-                            placeholder="Şehir adı örn: Kayseri">
-                        <button type="button" onclick="sehirTakipListesineEkle()"
-                            class="bg-emerald-600 hover:bg-emerald-700 px-3 rounded-xl font-bold text-sm"
-                            title="Bu şehri seyahat takip listeme ekle">
-                            📍 Takip Et
-                        </button>
-                    </div>
-                </div>
-
-                <div id="takipSehirleriAlani" class="bg-slate-950 p-3 rounded-xl border border-slate-800 hidden">
-                    <p class="text-xs text-slate-400 mb-2 font-bold">📍 Seyahat Modu / Takip Edilen Şehirlerim:</p>
-                    <div id="takipBadgeleri" class="flex flex-wrap gap-2">
-                    </div>
-                </div>
-
-                <div>
-                    <label for="buildingAge" class="block text-sm text-slate-400 mb-1">Bina Yaşı</label>
-                    <input id="buildingAge" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Bina yaşı">
-                </div>
-
-                <div>
-                    <label for="populationDensity" class="block text-sm text-slate-400 mb-1">Nüfus Yoğunluğu</label>
-                    <input id="populationDensity" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Nüfus yoğunluğu">
-                </div>
-
-                <div>
-                    <label for="pastDisasters" class="block text-sm text-slate-400 mb-1">Geçmiş Afet Sayısı</label>
-                    <input id="pastDisasters" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Geçmiş afet sayısı">
-                </div>
-
-                <div>
-                    <label for="hospitalCount" class="block text-sm text-slate-400 mb-1">Hastane Sayısı</label>
-                    <input id="hospitalCount" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Hastane sayısı">
-                </div>
-
-                <div>
-                    <label for="infrastructureScore" class="block text-sm text-slate-400 mb-1">Altyapı Dayanıklılığı
-                        (0-100)</label>
-                    <input id="infrastructureScore" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Altyapı dayanıklılığı 0-100">
-                </div>
-
-                <div>
-                    <label for="assemblyAreaCount" class="block text-sm text-slate-400 mb-1">Toplanma Alanı
-                        Sayısı</label>
-                    <input id="assemblyAreaCount" type="number"
-                        class="w-full p-3 rounded bg-slate-800 border border-slate-700 text-white"
-                        placeholder="Toplanma alanı sayısı">
-                </div>
-
-                <button onclick="predictRisk()"
-                    class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded-xl font-bold transition-colors">
-                    Risk Analizi Yap
-                </button>
-
-            </div>
-        </section>
-
-        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl flex flex-col justify-between" role="region"
-            aria-labelledby="resultHeading">
-            <div>
-                <h2 id="resultHeading" class="text-2xl font-semibold mb-4">Tahmin Sonucu</h2>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-slate-800 p-5 rounded-xl text-center">
-                        <p class="text-slate-400 text-sm">Risk Seviyesi</p>
-                        <h3 id="riskLevel" class="text-2xl font-bold mt-2">-</h3>
-                    </div>
-
-                    <div class="bg-slate-800 p-5 rounded-xl text-center">
-                        <p class="text-slate-400 text-sm">Dayanıklılık Puanı</p>
-                        <h3 id="resilienceScore" class="text-2xl font-bold mt-2">-</h3>
-                    </div>
-
-                    <div class="bg-slate-800 p-5 rounded-xl text-center">
-                        <p class="text-slate-400 text-sm">Sınıflandırma</p>
-                        <h3 id="safetyClass" class="text-2xl font-bold mt-2">-</h3>
-                    </div>
-                </div>
-
-                <div id="universalIconBox"
-                    class="mt-4 p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center gap-3 hidden">
-                    <span id="universalIcon" class="text-4xl">🟢</span>
-                    <span id="universalIconText" class="font-bold text-sm text-slate-300">Sistem Hazır / Güvenli
-                        Durum</span>
-                </div>
-
-                <div class="mt-6">
-                    <h3 class="text-xl font-semibold mb-3">Risk Barı</h3>
-                    <div class="w-full bg-slate-700 rounded-full h-6" role="progressbar" aria-valuenow="0"
-                        aria-valuemin="0" aria-valuemax="100">
-                        <div id="riskBar"
-                            class="h-6 rounded-full bg-green-500 text-center text-sm font-bold leading-6 transition-all duration-500"
-                            style="width: 0%">
-                            0%
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="mt-6 bg-slate-800 p-4 rounded-xl border-l-4 border-blue-500">
-                <h3 class="text-xl font-semibold mb-2">💡 Akıllı Öneri & Yön Bulma</h3>
-                <p id="recommendation" class="text-slate-300 text-sm leading-relaxed">
-                    Henüz analiz yapılmadı.
-                </p>
-            </div>
-        </section>
-
-        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl lg:col-span-2" role="region"
-            aria-labelledby="historyHeading">
-            <h2 id="historyHeading" class="text-2xl font-semibold mb-4">📋 Son Analiz Geçmişi (Veritabanı Kayıtları)
-            </h2>
-            <div class="overflow-x-auto bg-slate-950 rounded-xl border border-slate-800">
-                <table class="w-full border-collapse text-sm"
-                    aria-label="Sistem veritabanında kayıtlı son analiz geçmişi tablosu">
-                    <thead>
-                        <tr class="bg-slate-900 text-slate-300">
-                            <th scope="col" class="p-3 text-left">Şehir / Bölge</th>
-                            <th scope="col" class="p-3 text-left">Bina Yaşı</th>
-                            <th scope="col" class="p-3 text-left">Risk Durumu</th>
-                            <th scope="col" class="p-3 text-left">Tarih</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dbHistoryTableBody">
-                        <tr class="text-slate-400">
-                            <td colspan="4" class="p-4 text-center">Veritabanında henüz kayıtlı geçmiş analiz
-                                bulunmamaktadır.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <section class="bg-slate-900 p-6 rounded-2xl shadow-xl lg:col-span-2" role="region"
-            aria-labelledby="mapHeading">
-            <h2 id="mapHeading" class="text-2xl font-semibold mb-4">Türkiye Haritası Canlı Risk İzleme</h2>
-            <div id="map" aria-label="Canlı afet risk takip ve analiz haritası"></div>
-
-            <div class="mt-4 p-4 bg-slate-950 rounded-xl text-xs text-slate-400 space-y-1 border border-slate-800">
-                <p class="font-bold text-slate-300 mb-1">♿ İleri Düzey Erişilebilirlik Paket Özellikleri:</p>
-                <p>✅ <b>Görme Engelliler:</b> Tam eller serbest ses komut desteği ("Şehir Kayseri", "Analiz Et") ve
-                    sesli toplanma rehberi.</p>
-                <p>✅ <b>İşitme Engelliler:</b> Kritik afet anında ritmik mobil titreşim döngüsü ve tam ekran kırmızı
-                    flaşör uyarı sistemi.</p>
-                <p>✅ <b>Zihinsel/Öğrenme Güçlüğü:</b> Karmaşık yüzdeleri anlaşılır kılan evrensel renk-sembol kodlu afet
-                    ikonografisi.</p>
-            </div>
-        </section>
-
-    </main>
-
-    <script>
-        const map = L.map('map').setView([39.0, 35.0], 6);
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
-
-        const cityCoordinates = {
-            "İstanbul": [41.0082, 28.9784],
-            "Ankara": [39.9334, 32.8597],
-            "İzmir": [38.4237, 27.1428],
-            "Kayseri": [38.7205, 35.4826],
-            "Kahramanmaraş": [37.5753, 36.9228],
-            "Hatay": [36.2021, 36.1600],
-            "Malatya": [38.3552, 38.3095],
-            "Konya": [37.8714, 32.4847]
-        };
-
-        let marker;
-        let seyahatTakipListesi = JSON.parse(localStorage.getItem("riskAtlasTakipSehirleri")) || ["Konya", "Hatay"];
-
-        // ERİŞİLEBİLİRLİK: SES MOTORU AYARLARI
-        let girisRehberiEtkilesimleBasladi = false;
-        function sesliYonlendirmeAcikMi() { return localStorage.getItem("riskatlasSesliYonlendirme") !== "kapali"; }
-
-        function sesliYonlendirmeButonunuGuncelle() {
-            const btn = document.getElementById("voiceToggleButton");
-            if (!btn) return;
-            btn.textContent = sesliYonlendirmeAcikMi() ? "🔊 Sesli Yönlendirme: Açık" : "🔇 Sesli Yönlendirme: Kapalı";
-        }
-
-        function sesliYonlendirmeAyariniDegistir() {
-            if (sesliYonlendirmeAcikMi()) {
-                localStorage.setItem("riskatlasSesliYonlendirme", "kapali");
-                window.speechSynthesis.cancel();
-            } else {
-                localStorage.setItem("riskatlasSesliYonlendirme", "acik");
-                setTimeout(() => { girisSesliAciklama('manual'); }, 200);
-            }
-            sesliYonlendirmeButonunuGuncelle();
-        }
-
-        function sesliBilgiKonus(metin) {
-            if (!sesliYonlendirmeAcikMi()) return;
-            if ("speechSynthesis" in window) {
-                const mesaj = new SpeechSynthesisUtterance(metin);
-                mesaj.lang = "tr-TR";
-                mesaj.rate = 0.95;
-                window.speechSynthesis.cancel();
-                setTimeout(() => { window.speechSynthesis.speak(mesaj); }, 150);
-            }
-        }
-
-        // GÖRME ENGELLİLER İÇİN ERİŞİLEBİLİR SESLİ REHBER VE ASİSTAN TETİKLEYİCİ
-        function girisSesliAciklama(kaynak) {
-            if (!sesliYonlendirmeAcikMi()) return;
-            if (kaynak === 'manual' || kaynak === 'firstInteraction') {
-                girisRehberiEtkilesimleBasladi = true;
-            }
-
-            const metin = "RiskAtlas yapay zekâ destekli afet dirençliliği sistemine hoş geldiniz. " +
-                "Form alanlarını doldurarak veya eller serbest akıllı asistanı aktif ederek sesli komutlarla analiz yapabilirsiniz. " +
-                "Seyahat modunda gezdiğiniz şehirleri takip listesine ekleyerek o şehirlerdeki canlı risklerden anında sesli uyarı alabilirsiniz.";
-
-            if ("speechSynthesis" in window) {
-                window.speechSynthesis.cancel();
-                const msg = new SpeechSynthesisUtterance(metin);
-                msg.lang = "tr-TR";
-                msg.onend = function () {
-                    // Selamlama bitince akıllı asistan dinlemeyi otomatik aç
-                    otomatikSesliAsistanBaslat();
-                };
-                window.speechSynthesis.speak(msg);
-            }
-        }
-
-        // SEYAHAT MODU: ÇOKLU KONUM / ŞEHİR TAKİP YAPISI
-        function sehirTakipListesiniCiz() {
-            const alan = document.getElementById("takipSehirleriAlani");
-            const badgeler = document.getElementById("takipBadgeleri");
-            if (seyahatTakipListesi.length > 0) {
-                alan.classList.remove("hidden");
-                badgeler.innerHTML = seyahatTakipListesi.map(s => `
-                    <span class="bg-slate-800 text-emerald-400 font-bold px-3 py-1 rounded-lg text-xs border border-emerald-500/30 flex items-center gap-1">
-                        📍 ${s}
-                        <button type="button" onclick="sehirTakipListesindenSil('${s}')" class="text-red-400 hover:text-red-500 font-extrabold ml-1" aria-label="${s} şehrini takip listesinden kaldır">×</button>
-                    </span>
-                `).join('');
-            } else {
-                alan.classList.add("hidden");
-            }
-            localStorage.setItem("riskAtlasTakipSehirleri", JSON.stringify(seyahatTakipListesi));
-        }
-
-        function sehirTakipListesineEkle() {
-            const sehirInput = document.getElementById("city").value.trim();
-            if (!sehirInput) {
-                sesliBilgiKonus("Lütfen takip listesine eklemek için önce bir şehir adı giriniz.");
-                return;
-            }
-            const sehirDüzgün = sehirInput.charAt(0).upperCase + sehirInput.slice(1); // Basit capitalize
-            if (!seyahatTakipListesi.includes(sehirInput)) {
-                seyahatTakipListesi.push(sehirInput);
-                sehirTakipListesiniCiz();
-                sesliBilgiKonus(`${sehirInput} şehri seyahat takip listenize başarıyla eklendi.`);
-            }
-        }
-
-        function sehirTakipListesindenSil(sehir) {
-            seyahatTakipListesi = seyahatTakipListesi.filter(s => s !== sehir);
-            sehirTakipListesiniCiz();
-            sesliBilgiKonus(`${sehir} şehri takip listenizden kaldırıldı.`);
-        }
-
-        // SEYAHAT SİMÜLASYONU: ARKA PLANDA ÇOKLU ŞEHİR DEPREM KONTROLÜ
-        function seyahatSehirDepremKontrol(sehir, buyukluk) {
-            if (seyahatTakipListesi.includes(sehir) && buyukluk >= 4.5) {
-                const alarmMetni = `Dikkat! Takip listenizdeki ${sehir}'de ${buyukluk} büyüklüğünde kritik deprem risk uyarısı algılandı! Güvenli yerlere geçin!`;
-
-                document.getElementById("emergencyAlertText").innerText = alarmMetni;
-                const alertBox = document.getElementById("emergencyAlert");
-                alertBox.classList.remove("hidden");
-                document.getElementById("mainBody").classList.add("visual-alarm-active");
-
-                // İŞİTME ENGELLİLER İÇİN SÜREKLİ RİTMİK TİTREŞİM (Vibration API)
-                if (navigator.vibrate) {
-                    navigator.vibrate([400, 200, 400, 200, 800, 400, 400]);
-                }
-
-                // GÖRME ENGELLİLER İÇİN DINAMİK YÖNLÜ ACİL SES ÇIKIŞI
-                sesliBilgiKonus(alarmMetni);
-            }
-        }
-
-        function acilDurumKapat() {
-            document.getElementById("emergencyAlert").classList.add("hidden");
-            document.getElementById("mainBody").classList.remove("visual-alarm-active");
-            if (navigator.vibrate) navigator.vibrate(0);
-            window.speechSynthesis.cancel();
-        }
-
-        // GÖRME ENGELLİLER: SESLİ KOMUT KILAVUZU (SPEECH-TO-TEXT NAVİGASYON)
-        let recognition;
-        function otomatikSesliAsistanBaslat() {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                console.log("Tarayıcı ses tanıma desteklemiyor.");
-                return;
-            }
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = false;
-            recognition.lang = 'tr-TR';
-
-            recognition.onstart = function () {
-                document.getElementById("speechAsistanBtn").className = "bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1";
-                document.getElementById("speechAsistanBtn").textContent = "🎙️ Akıllı Asistan: Dinliyor";
-            };
-
-            recognition.onresult = function (event) {
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        let komut = event.results[i][0].transcript.trim().toLowerCase();
-                        console.log("Algılanan Sesli Komut:", komut);
-
-                        if (komut.includes("analiz et") || komut.includes("analizi yap")) {
-                            predictRisk();
-                        } else if (komut.includes("kapat") || komut.includes("alarmı sustur")) {
-                            acilDurumKapat();
-                        } else if (komut.includes("şehir") || komut.includes("konum")) {
-                            let parcalar = komut.split("şehir");
-                            if (parcalar.length > 1 && parcalar[1].trim()) {
-                                document.getElementById("city").value = parcalar[1].trim();
-                                sesliBilgiKonus("Şehir alanı sesli olarak güncellendi: " + parcalar[1].trim());
-                            }
-                        }
-                    }
-                }
-            };
-
-            recognition.onend = function () {
-                document.getElementById("speechAsistanBtn").className = "bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1";
-                document.getElementById("speechAsistanBtn").textContent = "🎙️ Akıllı Asistan: Kapalı";
-                if (sesliYonlendirmeAcikMi()) try { recognition.start(); } catch (e) { }
-            };
-
-            try { recognition.start(); } catch (e) { }
-        }
-
-        // RISK TAHMİN FONKSİYONU VE ERİŞİLEBİLİRLİK ENTEGRASYONU
-        function predictRisk() {
-            const city = document.getElementById("city").value || "Kayseri";
-
-            const buildingAge = Number(document.getElementById("buildingAge").value);
-            const populationDensity = Number(document.getElementById("populationDensity").value);
-            const pastDisasters = Number(document.getElementById("pastDisasters").value);
-            const hospitalCount = Number(document.getElementById("hospitalCount").value);
-            const infrastructureScore = Number(document.getElementById("infrastructureScore").value);
-            const assemblyAreaCount = Number(document.getElementById("assemblyAreaCount").value);
-
-            let riskScore =
-                buildingAge * 0.8 +
-                populationDensity * 0.02 +
-                pastDisasters * 5 -
-                hospitalCount * 0.4 -
-                infrastructureScore * 0.6 -
-                assemblyAreaCount * 0.2;
-
-            riskScore = Math.max(0, Math.min(100, Math.round(riskScore)));
-
-            let riskLevel = "";
-            let safetyClass = "";
-            let color = "";
-            let recommendation = "";
-            let universalIcon = "🟢";
-            let universalText = "";
-
-            // GÖRME ENGELLİLER: EN YAKIN TOPLANMA ALANI YÖN BULMA ANALİZİ (HESAPLAMALI REHBER)
-            let toplanmaMesafe = Math.max(100, 1000 - (assemblyAreaCount * 85));
-            let yonler = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Batı"];
-            let rastgeleYon = yonler[Math.floor(Math.random() * yonler.length)];
-
-            if (riskScore < 35) {
-                riskLevel = "Düşük";
-                safetyClass = "Güvenli";
-                color = "bg-green-500";
-                universalIcon = "🟢";
-                universalText = "Güvenli Durum";
-                recommendation = `Şehir genel olarak düşük riskli görünüyor. Mevcut altyapı korunmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
-            } else if (riskScore < 70) {
-                riskLevel = "Orta";
-                safetyClass = "Dikkatli Bölge";
-                color = "bg-yellow-500";
-                universalIcon = "🟡";
-                universalText = "Orta Risk / Dikkat";
-                recommendation = `Orta risk tespit edildi. Toplanma alanları ve bina dayanıklılığı artırılmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
-            } else {
-                riskLevel = "Yüksek";
-                safetyClass = "Güvensiz";
-                color = "bg-red-500";
-                universalIcon = "🔴";
-                universalText = "Yüksek Tehlike / Güvensiz Bölge";
-                recommendation = `Yüksek risk tespit edildi! Acil kentsel önlemler alınmalı. En yakın güvenli toplanma alanı ${toplanmaMesafe} metre ${rastgeleYon} yönündedir.`;
-
-                // İşitme engelliler için hafif titreşim uyarısı analizi
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-            }
-
-            const resilienceScore = 100 - riskScore;
-
-            document.getElementById("riskLevel").innerText = riskLevel;
-            document.getElementById("resilienceScore").innerText = resilienceScore + " / 100";
-            document.getElementById("safetyClass").innerText = safetyClass;
-            document.getElementById("recommendation").innerText = recommendation;
-
-            // ZİHİNSEL/ÖĞRENME GÜÇLÜĞÜ PANEL GÜNCELLEMESİ
-            const iconBox = document.getElementById("universalIconBox");
-            iconBox.classList.remove("hidden");
-            document.getElementById("universalIcon").innerText = universalIcon;
-            document.getElementById("universalIconText").innerText = universalText;
-
-            const riskBar = document.getElementById("riskBar");
-            riskBar.style.width = riskScore + "%";
-            riskBar.innerText = riskScore + "%";
-            riskBar.className = "h-6 rounded-full text-center text-sm " + color;
-
-            // Veritabanı geçmiş tablosuna simüle veya dinamik satır ekle
-            const yeniSatir = `<tr class="border-b border-slate-800 hover:bg-slate-900">
-                <td class="p-3 font-semibold">${city}</td>
-                <td class="p-3">${buildingAge || '-'}</td>
-                <td class="p-3 text-slate-300">${riskLevel}</td>
-                <td class="p-3 text-xs text-slate-500">Şimdi</td>
-            </tr>`;
-            document.getElementById("dbHistoryTableBody").innerHTML = yeniSatir + document.getElementById("dbHistoryTableBody").innerHTML;
-
-            // GÖRME ENGELLİ BİREYLER İÇİN ANALİZ SONUCUNUN ANINDA SESLENDİRİLMESİ
-            sesliBilgiKonus(`Analiz tamamlandı. ${city} şehri risk seviyesi ${riskLevel}. Sınıflandırma ${safetyClass}. Dayanıklılık puanı yüzde ${resilienceScore}. Öneri: ${recommendation}`);
-
-            showCityOnMap(city, riskScore, riskLevel);
-        }
-
-        function showCityOnMap(city, riskScore, riskLevel) {
-            const coords = cityCoordinates[city] || cityCoordinates["Kayseri"];
-
-            if (marker) {
-                map.removeLayer(marker);
-            }
-
-            let circleColor = "green";
-
-            if (riskScore >= 35 && riskScore < 70) {
-                circleColor = "orange";
-            } else if (riskScore >= 70) {
-                circleColor = "red";
-            }
-
-            marker = L.circle(coords, {
-                color: circleColor,
-                fillColor: circleColor,
-                fillOpacity: 0.5,
-                radius: 50000
-            }).addTo(map);
-
-            marker.bindPopup(`
-                <b>${city}</b><br>
-                Risk Seviyesi: ${riskLevel}<br>
-                Risk Puanı: ${riskScore}
-            `).openPopup();
-
-            map.setView(coords, 8);
-        }
-    </script>
-
-    <script>
-        window.addEventListener("load", function () {
-            sehirTakipListesiniCiz();
-            sesliYonlendirmeButonunuGuncelle();
-
-            setTimeout(function () {
-                const splash = document.getElementById("splash-screen");
-                if (splash) {
-                    splash.classList.add("fade-out");
-                    setTimeout(function () { splash.remove(); }, 800);
-                }
-            }, 1800);
-
-            // İlk etkileşimle ses tetiklemesi
-            setTimeout(() => {
-                if (sesliYonlendirmeAcikMi() && !girisRehberiEtkilesimleBasladi) {
-                    girisSesliAciklama('auto');
-                }
-            }, 2500);
-
-            // Seyahat takip modu simülasyon testi (Örnek: Hatay'da 5.3 büyüklüğünde deprem olursa)
-            setTimeout(() => {
-                seyahatSehirDepremKontrol("Hatay", 5.3);
-            }, 15000);
-
-            document.addEventListener('click', ilkEtkilesimdeSesliRehberiBaslat, { once: true });
-        });
-    </script>
-
-</body>
-
-</html>
+/* ==========================================================================
+   RiskAtlas ana sayfa stilleri (index.css)
+   1) Ana sayfanın tüm temel stilleri   2) Yeni bileşenler (CTA butonları, Hesap paneli)
+   Not: --risk-rengi değişkeni app.py içindeki küçük <style> bloğundan gelir.
+   ========================================================================== */
+
+/* ---------- 1) Temel stiller ---------- */
+:root {
+    --bg1:#06111f;
+    --bg2:#0b1e35;
+    --card:rgba(12, 29, 52, 0.88);
+    --card2:rgba(17, 41, 72, 0.88);
+    --text:#eaf4ff;
+    --muted:#a8c5df;
+    --blue:#2f89ff;
+    --blue2:#00c2ff;
+    --danger:#ff3b3b;
+    --border:rgba(95, 177, 255, 0.25);
+}
+
+#splash-screen {
+    display:none;
+}
+
+#splash-screen.fade-out {
+    opacity:0;
+    pointer-events:none;
+}
+
+.splash-image {
+    width:100%;
+    height:100%;
+    object-fit:cover;
+}
+
+body {
+    background:
+        radial-gradient(circle at top left, rgba(0,194,255,0.18), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(47,137,255,0.20), transparent 30%),
+        linear-gradient(135deg, var(--bg1), var(--bg2));
+    color:var(--text);
+    font-family:Arial, sans-serif;
+    margin:0;
+    padding:15px;
+}
+
+h1, h2 {
+    text-align:center;
+}
+
+.box {
+    background:var(--card);
+    color:var(--text);
+    padding:22px;
+    border-radius:18px;
+    margin:14px auto;
+    max-width:1200px;
+    box-shadow:0 18px 45px rgba(0,0,0,0.35);
+    border:1px solid var(--border);
+    backdrop-filter: blur(10px);
+}
+
+input,
+select {
+    padding:12px;
+    margin:5px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:#0b1b31;
+    color:var(--text);
+}
+
+label {
+    display:block;
+    margin-top:10px;
+    font-weight:bold;
+    color:#dceeff;
+}
+
+small {
+    display:block;
+    color:var(--muted);
+    margin:0 5px 8px 5px;
+    line-height:1.4;
+}
+
+.zemin-info-box {
+    margin-top:15px;
+    padding:15px;
+    background:rgba(0,194,255,0.10);
+    color:#dff6ff;
+    border-left:6px solid var(--blue2);
+    border-radius:12px;
+    line-height:1.5;
+}
+
+button {
+    padding:12px 16px;
+    background:linear-gradient(135deg, var(--blue), var(--blue2));
+    color:white;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:bold;
+    box-shadow:0 10px 25px rgba(0, 194, 255, 0.18);
+}
+
+button:hover {
+    filter:brightness(1.08);
+}
+
+.risk-score-box {
+    margin-top:15px;
+    padding:15px;
+    border-radius:12px;
+    background:rgba(255,255,255,0.08);
+    color:var(--text);
+    text-align:center;
+    font-size:20px;
+    font-weight:bold;
+    border:3px solid var(--risk-rengi);
+}
+
+.earthquake-list {
+    margin-top:15px;
+    padding:15px;
+    background:var(--card2);
+    color:var(--text);
+    border-radius:14px;
+    line-height:1.6;
+    border:1px solid var(--border);
+}
+
+.example-box {
+    margin-top:15px;
+    padding:15px;
+    background:rgba(255,255,255,0.08);
+    color:#dceeff;
+    border-radius:12px;
+    font-size:0.92em;
+    line-height:1.6;
+}
+
+.suggestion-box {
+    margin-top:20px;
+    padding:18px;
+    background:rgba(39,174,96,0.14);
+    color:#d8ffe8;
+    border-left:6px solid #27ae60;
+    border-radius:12px;
+    line-height:1.5;
+}
+
+.accessibility-note {
+    margin-top:20px;
+    padding:15px;
+    background:rgba(0,194,255,0.10);
+    color:#dff6ff;
+    border-radius:12px;
+    line-height:1.5;
+}
+
+.landing-screen {
+    min-height:100vh;
+    position:relative;
+    overflow:hidden;
+    border-radius:24px;
+    margin:0 auto 20px auto;
+    max-width:1250px;
+    background:
+        linear-gradient(180deg, rgba(3,10,22,0.18), rgba(3,10,22,0.78)),
+        url('/static/riskatlas-bg.png');
+    background-size:cover;
+    background-position:center;
+    border:1px solid var(--border);
+    box-shadow:0 25px 60px rgba(0,0,0,0.45);
+    padding:28px;
+    box-sizing:border-box;
+}
+
+.landing-topbar {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:18px;
+    position:relative;
+    z-index:2;
+}
+
+.brand {
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+
+.brand-icon {
+    width:54px;
+    height:54px;
+    border-radius:16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(135deg, #ef233c, #9d0208);
+    box-shadow:0 10px 25px rgba(255,59,59,0.28);
+    font-size:28px;
+}
+
+.brand-title {
+    font-size:30px;
+    font-weight:800;
+    letter-spacing:-0.5px;
+}
+
+.brand-title span {
+    color:#ff3b3b;
+}
+
+.brand-subtitle {
+    color:#d7eaff;
+    font-size:14px;
+    margin-top:2px;
+}
+
+.top-actions {
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    justify-content:flex-end;
+}
+
+.voice-toggle-btn {
+    background:rgba(39,174,96,0.22) !important;
+    border:1px solid rgba(39,174,96,0.55) !important;
+}
+
+.voice-toggle-btn.off {
+    background:rgba(255,255,255,0.10) !important;
+    border:1px solid rgba(255,255,255,0.22) !important;
+    color:#cfd8e3;
+}
+
+.top-actions button {
+    background:rgba(8,24,43,0.72);
+    border:1px solid var(--border);
+    box-shadow:none;
+    padding:10px 14px;
+}
+
+.landing-center {
+    min-height:62vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    z-index:2;
+}
+
+.landing-panel {
+    width:min(560px, 92%);
+    padding:32px;
+    background:rgba(7,17,33,0.86);
+    border:1px solid var(--border);
+    border-radius:24px;
+    backdrop-filter:blur(14px);
+    text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,0.42);
+}
+
+.landing-panel h1 {
+    text-align:center;
+    font-size:36px;
+    margin:0 0 8px 0;
+    letter-spacing:-0.5px;
+}
+
+.landing-panel h1 span {
+    color:#ff3b3b;
+}
+
+.landing-panel h2 {
+    text-align:center;
+    margin:18px 0 8px 0;
+    font-size:22px;
+}
+
+.landing-panel p {
+    color:#d7eaff;
+    font-size:16px;
+    line-height:1.55;
+    margin:8px 0;
+}
+
+.location-symbol {
+    margin:22px auto 14px auto;
+    width:92px;
+    height:92px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:radial-gradient(circle, rgba(47,137,255,0.28), rgba(0,194,255,0.06));
+    border:1px solid rgba(95,177,255,0.35);
+    font-size:54px;
+    box-shadow:0 0 45px rgba(47,137,255,0.28);
+}
+
+.landing-actions {
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
+    gap:12px;
+    margin-top:22px;
+}
+
+.landing-actions button {
+    min-width:170px;
+    font-size:16px;
+}
+
+.secondary-btn {
+    background:rgba(255,255,255,0.10);
+    border:1px solid var(--border);
+}
+
+.status-box {
+    margin-top:16px;
+    padding:14px;
+    border-radius:12px;
+    background:rgba(255,255,255,0.08);
+    color:#dff6ff;
+    line-height:1.5;
+}
+
+.side-card {
+    position:absolute;
+    z-index:2;
+    width:250px;
+    padding:18px;
+    border-radius:16px;
+    background:rgba(7,17,33,0.72);
+    border:1px solid var(--border);
+    backdrop-filter:blur(10px);
+    line-height:1.5;
+    box-shadow:0 18px 45px rgba(0,0,0,0.28);
+}
+
+.side-card h3 {
+    margin:0 0 8px 0;
+}
+
+.side-card p,
+.side-card li {
+    color:#d7eaff;
+    font-size:14px;
+}
+
+.side-card.left {
+    left:28px;
+    bottom:145px;
+    border-color:rgba(255,59,59,0.42);
+}
+
+.side-card.right {
+    right:28px;
+    bottom:145px;
+    border-color:rgba(39,174,96,0.46);
+}
+
+.side-card ul {
+    margin:8px 0 0 0;
+    padding-left:22px;
+}
+
+.bottom-features {
+    position:absolute;
+    z-index:2;
+    left:28px;
+    right:28px;
+    bottom:28px;
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:12px;
+    padding:14px;
+    background:rgba(7,17,33,0.64);
+    border:1px solid var(--border);
+    border-radius:18px;
+    backdrop-filter:blur(10px);
+}
+
+.feature-item {
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+    padding:10px;
+    border-right:1px solid rgba(95,177,255,0.16);
+}
+
+.feature-item:last-child {
+    border-right:none;
+}
+
+.feature-icon {
+    width:42px;
+    height:42px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(47,137,255,0.20);
+    font-size:22px;
+    flex-shrink:0;
+}
+
+.feature-item b {
+    display:block;
+    margin-bottom:4px;
+}
+
+.feature-item span {
+    color:#c8dff2;
+    font-size:14px;
+    line-height:1.4;
+}
+
+.main-content {
+    display:none;
+}
+
+.main-content.active {
+    display:block;
+}
+
+.emergency-alert {
+    display:none;
+    position:fixed;
+    z-index:99999;
+    top:0;
+    left:0;
+    width:100%;
+    height:100vh;
+    background:red;
+    color:white;
+    text-align:center;
+    padding:30vh 20px 0 20px;
+    box-sizing:border-box;
+    animation:flash 0.7s infinite;
+}
+
+.emergency-alert h1 {
+    font-size:44px;
+    margin-bottom:15px;
+}
+
+.emergency-alert p {
+    font-size:24px;
+    font-weight:bold;
+}
+
+.close-alert {
+    margin-top:20px;
+    background:white;
+    color:#b00000;
+    font-size:18px;
+}
+
+@keyframes flash {
+    0% { background-color:#ff0000; }
+    50% { background-color:#6b0000; }
+    100% { background-color:#ff0000; }
+}
+
+@media (max-width:700px) {
+    #splash-screen {
+        position:fixed;
+        inset:0;
+        background:#081120;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        z-index:999999;
+        transition:opacity .8s ease;
+    }
+
+    body {
+        padding:8px;
+        background:
+            linear-gradient(180deg, rgba(3,10,22,0.35), rgba(3,10,22,0.88)),
+            url('/static/mobile-bg.png');
+        background-size: cover;
+        background-position: center top;
+        background-repeat: no-repeat;
+        background-attachment: scroll;
+    }
+
+    .landing-screen {
+        background:
+            linear-gradient(180deg, rgba(3,10,22,0.25), rgba(3,10,22,0.82)),
+            url('/static/mobile-bg.png');
+        background-size: cover;
+        background-position: center top;
+        background-repeat: no-repeat;
+        border-radius: 22px;
+        overflow: hidden;
+    }
+
+    .box {
+        padding:12px;
+    }
+
+    input,
+    select,
+    button {
+        width:100%;
+        box-sizing:border-box;
+        margin:6px 0;
+    }
+
+    h1 {
+        font-size:24px;
+    }
+
+    h2 {
+        font-size:18px;
+    }
+
+    .landing-screen {
+        min-height:auto;
+        padding:14px;
+    }
+
+    .landing-topbar {
+        flex-direction:column;
+    }
+
+    .top-actions {
+        justify-content:flex-start;
+    }
+
+    .top-actions button {
+        width: 100%;
+        font-size: 16px;
+        padding: 14px;
+    }
+
+    .landing-center {
+        min-height:auto;
+        padding:28px 0;
+    }
+
+    .landing-panel {
+        padding:26px 20px;
+        width:100%;
+        border-radius:28px;
+    }
+
+    .landing-panel h1 {
+        font-size:42px;
+        line-height:1.15;
+    }
+
+    .side-card {
+        position:static;
+        width:auto;
+        margin:12px 0;
+    }
+
+    .bottom-features {
+        position:static;
+        grid-template-columns:1fr;
+        margin-top:12px;
+    }
+
+    .feature-item {
+        border-right:none;
+        border-bottom:1px solid rgba(95,177,255,0.16);
+    }
+
+    .feature-item:last-child {
+        border-bottom:none;
+    }
+
+    .emergency-alert h1 {
+        font-size:34px;
+    }
+
+    .emergency-alert p {
+        font-size:20px;
+    }
+}
+
+/* ---------- 2) Yeni bileşenler ---------- */
+/* ---------- Ana butonlar ---------- */
+.landing-actions.cta-group { margin-top: 26px; gap: 14px; }
+.landing-actions .cta-primary,
+.landing-actions .cta-city {
+    min-width: 250px; padding: 16px 28px; border-radius: 14px; font-size: 19px; font-weight: 800;
+    cursor: pointer; transition: transform .15s ease, box-shadow .2s ease;
+}
+.landing-actions .cta-primary {
+    border: 0; color: #fff; background: linear-gradient(135deg, #2f89ff, #00c2ff);
+    box-shadow: 0 12px 30px -8px rgba(0, 194, 255, .65);
+}
+.landing-actions .cta-primary:hover { box-shadow: 0 16px 38px -8px rgba(0, 194, 255, .85); transform: translateY(-1px); }
+.landing-actions .cta-city {
+    color: #eaf4ff; background: rgba(14, 165, 168, .16); border: 1px solid rgba(14, 165, 168, .6); box-shadow: none;
+}
+.landing-actions .cta-city:hover { background: rgba(14, 165, 168, .28); }
+.landing-actions .cta-primary:active, .landing-actions .cta-city:active { transform: scale(.98); }
+.cta-hint { margin: 10px auto 0; font-size: 14px; color: #a8c5df; }
+.link-btn {
+    display: block; margin: 14px auto 0; padding: 8px 14px; background: none !important; border: 0 !important;
+    box-shadow: none !important; color: #8bd5ff; font-size: 14px; text-decoration: underline; cursor: pointer;
+}
+
+/* ---------- Hesap paneli ---------- */
+.hesap-arka { position: fixed; inset: 0; z-index: 9998; background: rgba(2, 8, 20, .62); backdrop-filter: blur(3px); }
+.hesap-paneli {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 9999; width: min(440px, 100%); overflow-y: auto;
+    padding: 22px 20px 28px; text-align: left; color: #eaf4ff;
+    background: linear-gradient(180deg, #0b1e35, #06111f); border-left: 1px solid rgba(95, 177, 255, .25);
+    box-shadow: -20px 0 60px rgba(0, 0, 0, .5);
+}
+.hesap-arka[hidden], .hesap-paneli[hidden] { display: none; }
+.hesap-baslik { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.hesap-baslik h2 { margin: 0; font-size: 22px; }
+.hesap-paneli .kapat {
+    width: 40px; height: 40px; padding: 0; border-radius: 10px; font-size: 18px; cursor: pointer;
+    background: rgba(255, 255, 255, .08); border: 1px solid rgba(95, 177, 255, .25); color: #eaf4ff; box-shadow: none;
+}
+.hesap-ayar {
+    display: block; padding: 14px 16px; margin-bottom: 22px; border-radius: 12px; text-align: center;
+    font-weight: 700; text-decoration: none; color: #eaf4ff;
+    background: rgba(95, 177, 255, .10); border: 1px solid rgba(95, 177, 255, .3);
+}
+.hesap-ayar:hover { background: rgba(95, 177, 255, .2); }
+.hesap-paneli h3 { margin: 0 0 6px; font-size: 18px; display: flex; justify-content: space-between; align-items: center; }
+.hesap-paneli .sayac { font-size: 13px; color: #a8c5df; font-weight: 600; }
+.hesap-paneli .ipucu { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: #a8c5df; }
+
+.sehir-kutulari { display: grid; gap: 12px; }
+.sehir-kutu { padding: 14px; border-radius: 14px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(95, 177, 255, .25); }
+.sehir-kutu.bos { display: flex; flex-direction: column; align-items: stretch; gap: 10px; border-style: dashed; }
+.sehir-kutu.bos > input, .sehir-kutu.bos > button { margin: 0 !important; width: 100% !important; max-width: none !important; box-sizing: border-box; }
+.sehir-kutu.dolu.ana { border-color: rgba(61, 220, 132, .55); background: rgba(61, 220, 132, .07); }
+.sehir-kutu input[type=text] {
+    width: 100%; min-height: 46px; padding: 0 14px; border-radius: 10px; font-size: 15px; color: #eaf4ff;
+    background: #0b1b30; border: 1px solid rgba(95, 177, 255, .3); box-sizing: border-box;
+}
+.sehir-kutu input[type=text]:focus { outline: none; border-color: #00c2ff; box-shadow: 0 0 0 3px rgba(0, 194, 255, .2); }
+.sehir-kutu.bos button[type=submit] {
+    min-height: 44px; border: 0; border-radius: 10px; font-weight: 700; font-size: 15px; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #0ea5a8, #087f8c);
+}
+.sehir-ad { font-size: 17px; font-weight: 800; }
+.sehir-islem { display: flex; gap: 8px; margin-top: 10px; }
+.sehir-islem form { margin: 0; }
+.mini {
+    padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: none;
+    color: #8bd5ff; background: rgba(95, 177, 255, .10); border: 1px solid rgba(95, 177, 255, .3);
+}
+.mini.sil { color: #ff8b8b; background: rgba(255, 59, 59, .10); border-color: rgba(255, 59, 59, .35); }
+
+.kutu-ekle {
+    width: 100%; margin-top: 16px; padding: 14px; border-radius: 14px; font-size: 16px; font-weight: 700; cursor: pointer;
+    color: #eaf4ff; background: transparent; border: 2px dashed rgba(95, 177, 255, .45); box-shadow: none;
+}
+.kutu-ekle:hover:not(:disabled) { background: rgba(95, 177, 255, .10); }
+.kutu-ekle:disabled { opacity: .5; cursor: not-allowed; }
+.kutu-ekle small { color: #a8c5df; font-weight: 500; }
+
+.hesap-paneli button:focus-visible, .hesap-paneli a:focus-visible, .landing-actions button:focus-visible, .link-btn:focus-visible {
+    outline: 3px solid #fff; outline-offset: 2px;
+}
+@media (max-width: 560px) {
+    .landing-actions .cta-primary, .landing-actions .cta-city { width: 100%; min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .landing-actions button { transition: none; } }

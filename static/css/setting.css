@@ -1,1 +1,48 @@
+/* RiskAtlas - Ayarlar sayfası (templates/setting.html) */
+:root { color-scheme: dark; }
+*, *::before, *::after { box-sizing: border-box; }
+body {
+    margin: 0; min-height: 100vh; color: #eaf4ff;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    background: radial-gradient(900px 600px at 50% 0%, #14224a 0%, transparent 65%), linear-gradient(180deg, #0d1630, #070c18) fixed;
+}
+.settings-container { max-width: 720px; margin: 0 auto; padding: 32px 18px 60px; }
+.settings-container h2 { margin: 0 0 22px; font-size: 1.8rem; }
+.settings-card {
+    margin-bottom: 18px; padding: 20px 22px; border-radius: 18px;
+    background: rgba(18, 26, 46, .78); border: 1px solid rgba(148, 170, 210, .16);
+    box-shadow: 0 20px 50px -20px rgba(0, 0, 0, .6);
+}
+.settings-card h3 { margin: 0 0 14px; font-size: 1.15rem; }
+.settings-card p { margin: 0; line-height: 1.6; color: #b8c7e0; }
+.settings-card .description { margin: 4px 0 14px; font-size: .92rem; }
+.setting-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid rgba(148, 170, 210, .10); }
+.setting-item:first-of-type { border-top: 0; }
+.setting-item > span { font-weight: 600; }
 
+/* Açma/kapama anahtarı */
+.switch { position: relative; display: inline-block; width: 52px; height: 30px; flex: none; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
+.slider { position: absolute; inset: 0; border-radius: 30px; background: #2a3556; transition: background .2s; }
+.slider::before {
+    content: ""; position: absolute; left: 4px; top: 4px; width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; transition: transform .2s;
+}
+.switch input:checked + .slider { background: #14b8a6; }
+.switch input:checked + .slider::before { transform: translateX(22px); }
+.switch input:focus-visible + .slider { outline: 3px solid #fff; outline-offset: 2px; }
+
+.save-btn {
+    width: 100%; min-height: 54px; margin-top: 6px; border: 0; border-radius: 14px; cursor: pointer;
+    font-size: 1.05rem; font-weight: 800; color: #04201d;
+    background: linear-gradient(180deg, #14b8a6, #0e9488); box-shadow: 0 12px 28px -10px rgba(20, 184, 166, .7);
+}
+.save-btn:disabled { opacity: .6; cursor: wait; }
+.save-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.settings-status { min-height: 24px; margin: 12px 0 0; text-align: center; color: #86efac; font-weight: 600; }
+.settings-status.hata { color: #fca5a5; }
+
+/* Erişilebilirlik modları (kayıtlı ayarlar ana sayfada da aynı sınıflarla uygulanır) */
+html.ayar-buyuk-yazi body { zoom: 1.15; }
+html.ayar-yuksek-kontrast body { filter: contrast(1.3) brightness(1.08); }
+@media (prefers-reduced-motion: reduce) { .slider, .slider::before { transition: none; } }

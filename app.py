@@ -14,10 +14,11 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 import folium
+from markupsafe import escape as _html_escape
 import joblib
 import pandas as pd
 import requests
-from flask import Flask, flash, make_response, redirect, render_template, render_template_string, request, session, url_for
+from flask import Flask, flash, jsonify, make_response, redirect, render_template, render_template_string, request, session, url_for
 
 
 # -----------------------------------------------------------------------------
@@ -61,6 +62,8 @@ DATA_PATHS = {
     "geojson": os.path.join(BASE_DIR, "datasets", "turkey_provinces.geojson"),
     "ilce": os.path.join(BASE_DIR, "datasets", "turkey_districts.csv"),
     "zemin": os.path.join(BASE_DIR, "datasets", "zemin_verileri.csv"),
+    "dunya": os.path.join(BASE_DIR, "datasets", "dunya_yerlesimleri.json"),
+    "tr_adres": os.path.join(BASE_DIR, "datasets", "turkiye_adres.csv"),
 }
 
 # Eski değişken adları, dosyanın ilerleyen bölümlerindeki mevcut kodu bozmamak
@@ -193,6 +196,14 @@ def veritabani_olustur() -> None:
             if "user_id" not in analysis_columns:
                 cursor.execute("ALTER TABLE analiz_kayitlari ADD COLUMN user_id INTEGER")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_analiz_user ON analiz_kayitlari(user_id)")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS kullanici_ayarlari (
+                    user_id INTEGER PRIMARY KEY,
+                    ayarlar_json TEXT NOT NULL,
+                    guncelleme TEXT
+                )
+            """)
 
         logger.info("Veritabanı hazır: gerekli tablolar ve indeksler kontrol edildi.")
     except sqlite3.Error:
@@ -610,7 +621,7 @@ def otomatik_model_degerleri(sehir: str, ilce: str = "") -> Tuple[float, float, 
         return varsayilan
 
 
-def kullaniciye_ozel_oneriler_uret(bina_yasi: float, kat_sayisi: int, bulundugu_kat: int, kisi_sayisi: int, erisim_ihtiyaci: str) -> List[str]:
+def kullaniciye_ozel_oneriler_uret(bina_yasi: float, kat_sayisi: int, bulundugu_kat: int, erisim_ihtiyaci: str) -> List[str]:
     oneriler: List[str] = []
     if bina_yasi >= 25:
         oneriler.append("Bina yaşı yüksek olduğu için yetkili bir yapı güvenliği incelemesi düşünülmelidir.")
@@ -618,8 +629,6 @@ def kullaniciye_ozel_oneriler_uret(bina_yasi: float, kat_sayisi: int, bulundugu_
         oneriler.append("Yüksek katlı bir binada yaşıyorsanız deprem sırasında merdivenleri kullanmaya yönelik tahliye planınızı önceden belirleyin.")
     if bulundugu_kat > 0 and kat_sayisi > 0 and bulundugu_kat == kat_sayisi:
         oneriler.append("En üst katta olduğunuz için deprem sırasında asansör kullanmayın ve önceden belirlediğiniz güvenli alana yönelin.")
-    if kisi_sayisi >= 5:
-        oneriler.append("Evdeki kişi sayısı fazla olduğu için aile iletişim ve buluşma planınızı önceden belirleyin.")
     if erisim_ihtiyaci == "gorme":
         oneriler.append("Görme desteği ihtiyacınız varsa sesli yönlendirme ve sesli deprem alarmı ayarlarını ayrıca kontrol edin.")
     elif erisim_ihtiyaci == "isitme":
@@ -766,57 +775,127 @@ def sehirleri_renklendir(m: folium.Map, secilen_sehir: str, risk_skoru: int, ris
 # -----------------------------------------------------------------------------
 # 7. AUTH / ACCOUNT / LOCATION ROUTES
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ÜLKE VERİSİ (datasets/dunya_yerlesimleri.json -> veri_cek.py üretir)
+# -----------------------------------------------------------------------------
+VARSAYILAN_ULKE_KODU = "TR"
+
+_YEDEK_ULKELER = (
+    "TR=Türkiye;AF=Afganistan;DE=Almanya;US=Amerika Birleşik Devletleri;AD=Andorra;AO=Angola;AG=Antigua ve Barbuda;"
+    "AR=Arjantin;AL=Arnavutluk;AU=Avustralya;AT=Avusturya;AZ=Azerbaycan;BS=Bahamalar;BH=Bahreyn;BD=Bangladeş;"
+    "BB=Barbados;BY=Belarus;BE=Belçika;BZ=Belize;BJ=Benin;AE=Birleşik Arap Emirlikleri;GB=Birleşik Krallık;"
+    "BO=Bolivya;BA=Bosna-Hersek;BW=Botsvana;BR=Brezilya;BN=Brunei;BG=Bulgaristan;BF=Burkina Faso;BI=Burundi;"
+    "BT=Butan;CV=Cabo Verde;CZ=Çekya;DZ=Cezayir;TD=Çad;CN=Çin;DK=Danimarka;TL=Doğu Timor;DO=Dominik Cumhuriyeti;"
+    "DM=Dominika;EC=Ekvador;GQ=Ekvator Ginesi;SV=El Salvador;ID=Endonezya;ER=Eritre;AM=Ermenistan;EE=Estonya;"
+    "SZ=Esvatini;ET=Etiyopya;MA=Fas;FJ=Fiji;CI=Fildişi Sahili;PH=Filipinler;PS=Filistin;FI=Finlandiya;FR=Fransa;"
+    "GA=Gabon;GM=Gambiya;GH=Gana;GN=Gine;GW=Gine-Bissau;GD=Grenada;GT=Guatemala;GY=Guyana;ZA=Güney Afrika;"
+    "KR=Güney Kore;SS=Güney Sudan;GE=Gürcistan;HT=Haiti;HR=Hırvatistan;IN=Hindistan;NL=Hollanda;HN=Honduras;"
+    "IQ=Irak;IR=İran;IE=İrlanda;ES=İspanya;IL=İsrail;SE=İsveç;CH=İsviçre;IT=İtalya;IS=İzlanda;JM=Jamaika;JP=Japonya;"
+    "KH=Kamboçya;CM=Kamerun;CA=Kanada;ME=Karadağ;QA=Katar;KZ=Kazakistan;KE=Kenya;CY=Kıbrıs;KG=Kırgızistan;"
+    "KI=Kiribati;CO=Kolombiya;KM=Komorlar;CG=Kongo;CD=Kongo Demokratik Cumhuriyeti;XK=Kosova;CR=Kosta Rika;"
+    "KW=Kuveyt;KP=Kuzey Kore;MK=Kuzey Makedonya;CU=Küba;LA=Laos;LS=Lesotho;LV=Letonya;LR=Liberya;LY=Libya;"
+    "LI=Lihtenştayn;LT=Litvanya;LB=Lübnan;LU=Lüksemburg;HU=Macaristan;MG=Madagaskar;MW=Malavi;MV=Maldivler;"
+    "MY=Malezya;ML=Mali;MT=Malta;MH=Marshall Adaları;MX=Meksika;EG=Mısır;FM=Mikronezya;MN=Moğolistan;MD=Moldova;"
+    "MC=Monako;MR=Moritanya;MU=Mauritius;MZ=Mozambik;MM=Myanmar;NA=Namibya;NR=Nauru;NP=Nepal;NE=Nijer;NG=Nijerya;"
+    "NI=Nikaragua;NO=Norveç;CF=Orta Afrika Cumhuriyeti;UZ=Özbekistan;PK=Pakistan;PW=Palau;PA=Panama;"
+    "PG=Papua Yeni Gine;PY=Paraguay;PE=Peru;PL=Polonya;PT=Portekiz;RO=Romanya;RW=Ruanda;RU=Rusya;KN=Saint Kitts ve Nevis;"
+    "LC=Saint Lucia;VC=Saint Vincent ve Grenadinler;WS=Samoa;SM=San Marino;ST=São Tomé ve Príncipe;SN=Senegal;"
+    "SC=Seyşeller;RS=Sırbistan;SL=Sierra Leone;SG=Singapur;SK=Slovakya;SI=Slovenya;SB=Solomon Adaları;SO=Somali;"
+    "LK=Sri Lanka;SD=Sudan;SR=Surinam;SY=Suriye;SA=Suudi Arabistan;TJ=Tacikistan;TZ=Tanzanya;TH=Tayland;TW=Tayvan;"
+    "TG=Togo;TO=Tonga;TT=Trinidad ve Tobago;TN=Tunus;TM=Türkmenistan;TV=Tuvalu;UG=Uganda;UA=Ukrayna;OM=Umman;"
+    "UY=Uruguay;JO=Ürdün;VU=Vanuatu;VA=Vatikan;VE=Venezuela;VN=Vietnam;YE=Yemen;NZ=Yeni Zelanda;GR=Yunanistan;"
+    "ZM=Zambiya;ZW=Zimbabve"
+)
+
+_dunya_onbellek: Dict[str, Any] = {"mtime": None, "veri": {}}
+
+
+class UlkeVerisiYok(Exception):
+    """Türkiye dışındaki ülkeler için risk modeli henüz yokken analizi durdurur."""
+
+
+def dunya_verisi_getir() -> Dict[str, Any]:
+    """datasets/dunya_yerlesimleri.json içindeki ülke verisini (dosya değişince yenilenerek) döndürür.
+
+    Biçim: {"ulkeler": {"US": {"ad": "Amerika Birleşik Devletleri", "bolgeler": {"California": ["Los Angeles", ...]}}}}
+    """
+    yol = DATA_PATHS["dunya"]
+    try:
+        mtime = os.path.getmtime(yol)
+    except OSError:
+        return {}
+    if _dunya_onbellek["mtime"] != mtime:
+        try:
+            with open(yol, encoding="utf-8") as f:
+                _dunya_onbellek["veri"] = json.load(f).get("ulkeler", {})
+            _dunya_onbellek["mtime"] = mtime
+        except Exception:
+            logger.exception("Dünya yerleşim verisi okunamadı")
+            return {}
+    return _dunya_onbellek["veri"]
+
+
+def ulke_listesi_getir() -> List[Tuple[str, str]]:
+    """[(ülke_kodu, ülke_adı)] döndürür: Türkiye başta, diğerleri Türkçe sıralı."""
+    veri = dunya_verisi_getir()
+    if veri:
+        ulkeler = {k: (v.get("ad") or k) for k, v in veri.items()}
+    else:
+        ulkeler = {}
+        for parca in _YEDEK_ULKELER.split(";"):
+            if "=" in parca:
+                kod, ad = parca.split("=", 1)
+                ulkeler[kod] = ad
+    ulkeler["TR"] = "Türkiye"
+    digerleri = sorted(((k, a) for k, a in ulkeler.items() if k != "TR"), key=lambda x: normalize_text(x[1]))
+    return [("TR", "Türkiye")] + digerleri
+
+
+@app.route("/api/ulke/<kod>")
+def api_ulke(kod: str):
+    """Seçilen ülkenin eyalet/bölge -> şehir/kasaba listesini JSON olarak verir (Türkiye sayfadan gelir)."""
+    kod = (kod or "").strip().upper()
+    if kod == "TR":
+        return jsonify({"kod": "TR", "veri_var": True, "bolgeler": {}})
+    ulke = dunya_verisi_getir().get(kod)
+    if not ulke:
+        return jsonify({"kod": kod, "veri_var": False, "bolgeler": {}})
+    bolgeler = ulke.get("bolgeler", {})
+    return jsonify({"kod": kod, "ad": ulke.get("ad", kod), "veri_var": bool(bolgeler), "bolgeler": bolgeler})
+
+
+def harita_altligi_ekle(m: folium.Map) -> None:
+    """Harita altlıklarını ekler.
+
+    CARTO, Ağustos 2026 sonundan beri anahtarsız karolara "API KEY REQUIRED" filigranı basıyor.
+    Bu yüzden varsayılan altlık anahtarsız OpenStreetMap'tir. CARTO_API_KEY ortam değişkeni
+    tanımlıysa (ücretsiz anahtar: carto.com/basemaps/apikey) temiz CARTO altlıkları da eklenir
+    ve varsayılan olur. Altlıklar sağ üstteki katman düğmesinden değiştirilebilir.
+    """
+    carto_key = os.environ.get("CARTO_API_KEY", "").strip()
+
+    folium.TileLayer(tiles="openstreetmap", name="OpenStreetMap", show=not carto_key).add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
+        name="Açık gri (Esri)",
+        max_zoom=16,
+        show=False,
+    ).add_to(m)
+
+    if carto_key:
+        for ad, stil, goster in (("CARTO Açık", "light_all", True), ("CARTO Koyu", "dark_all", False)):
+            folium.TileLayer(
+                tiles=f"https://basemaps.cartocdn.com/{stil}/{{z}}/{{x}}/{{y}}{{r}}.png?key={carto_key}",
+                attr="&copy; OpenStreetMap contributors &copy; CARTO",
+                name=ad,
+                show=goster,
+            ).add_to(m)
+
+
 @app.route("/healthz")
 def healthz():
     return "OK", 200
-
-LOGIN_PAGE_HTML = r"""<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giriş Yap | RiskAtlas</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-</head>
-<body>
-<div class="login-container">
-    <div class="login-card">
-        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="RiskAtlas Logo" class="login-logo">
-        <h1>RiskAtlas</h1>
-        <p class="subtitle">Yapay Zekâ Destekli Deprem Analiz ve Erken Uyarı Sistemi</p>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert {{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        <form method="POST" action="{{ url_for('login') }}">
-            <div class="form-group">
-                <label for="email"><i class="fa-solid fa-envelope"></i> E-Posta</label>
-                <input id="email" name="email" type="email" placeholder="ornek@mail.com" autocomplete="email" required>
-            </div>
-            <div class="form-group">
-                <label for="password"><i class="fa-solid fa-lock"></i> Şifre</label>
-                <input id="password" name="password" type="password" placeholder="Şifrenizi giriniz" autocomplete="current-password" required>
-            </div>
-            <div class="remember-row">
-                <label><input type="checkbox" name="remember"> Beni Hatırla</label>
-            </div>
-            <button type="submit" class="btn-login"><i class="fa-solid fa-right-to-bracket"></i> Giriş Yap</button>
-        </form>
-        <div class="divider">veya</div>
-        <a href="{{ url_for('register') }}" class="register-link"><i class="fa-solid fa-user-plus"></i> Hesabınız yok mu? Hesap Oluştur</a>
-        <button id="voiceLogin" class="voice-button"><i class="fa-solid fa-microphone"></i> Sesli Yardımı Başlat</button>
-        <div class="guest-area">
-            <a href="{{ url_for('guest_login') }}" class="guest-link">Misafir Olarak Devam Et</a>
-        </div>
-    </div>
-</div>
-<script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
-</body>
-</html>"""
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -825,13 +904,13 @@ def login():
         password = request.form.get("password", "")
         if not email or not password:
             flash("E-posta ve şifre alanları zorunludur.", "error")
-            return render_template_string(LOGIN_PAGE_HTML)
+            return render_template("login.html")
         try:
             with get_db_connection() as conn:
                 user = conn.execute("SELECT * FROM kullanicilar WHERE email=?", (email,)).fetchone()
             if not user or not check_password_hash(user["password_hash"], password):
                 flash("E-posta veya şifre hatalı.", "error")
-                return render_template_string(LOGIN_PAGE_HTML)
+                return render_template("login.html")
             session.clear()
             session.permanent = bool(request.form.get("remember"))
             session["user_id"] = int(user["id"])
@@ -844,7 +923,7 @@ def login():
         except sqlite3.Error:
             logger.exception("Giriş sırasında veritabanı hatası")
             flash("Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.", "error")
-    return render_template_string(LOGIN_PAGE_HTML)
+    return render_template("login.html")
 
 @app.route("/guest-login")
 def guest_login():
@@ -974,6 +1053,83 @@ def ana_konum_yap():
         flash("Ana konum güncellenirken hata oluştu.", "error")
     return redirect(url_for("index"))
 
+# -----------------------------------------------------------------------------
+# KULLANICI AYARLARI (templates/setting.html)
+# -----------------------------------------------------------------------------
+AYAR_VARSAYILANLARI: Dict[str, bool] = {
+    "voice_assistant": True,
+    "voice_login": True,
+    "voice_analysis": True,
+    "blind_mode": False,
+    "hearing_mode": False,
+    "large_text": False,
+    "high_contrast": False,
+    "sound_alarm": True,
+    "vibration": True,
+    "flash_alert": False,
+}
+
+
+def kullanici_ayarlarini_getir() -> Dict[str, bool]:
+    """Giriş yapmış kullanıcının ayarlarını veritabanından, misafirin ayarlarını oturumdan okur."""
+    ayarlar = dict(AYAR_VARSAYILANLARI)
+    kayitli: Dict[str, Any] = {}
+    user_id = aktif_kullanici_id()
+    try:
+        if user_id is not None:
+            with get_db_connection() as conn:
+                satir = conn.execute("SELECT ayarlar_json FROM kullanici_ayarlari WHERE user_id=?", (user_id,)).fetchone()
+            if satir:
+                kayitli = json.loads(satir["ayarlar_json"])
+        else:
+            kayitli = session.get("ayarlar", {})
+    except (sqlite3.Error, ValueError, TypeError):
+        logger.exception("Kullanıcı ayarları okunamadı")
+    if isinstance(kayitli, dict):
+        for anahtar in ayarlar:
+            if anahtar in kayitli:
+                ayarlar[anahtar] = bool(kayitli[anahtar])
+    return ayarlar
+
+
+def kullanici_ayarlarini_kaydet(ayarlar: Dict[str, bool]) -> None:
+    user_id = aktif_kullanici_id()
+    if user_id is None:
+        session["ayarlar"] = ayarlar
+        return
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO kullanici_ayarlari (user_id, ayarlar_json, guncelleme) VALUES (?, ?, ?)",
+            (user_id, json.dumps(ayarlar), datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def etkin_ayarlar(ayarlar: Dict[str, bool]) -> Dict[str, bool]:
+    """Erişilebilirlik modlarının getirdiği ek davranışları uygular."""
+    etkin = dict(ayarlar)
+    if etkin["blind_mode"]:  # Görme engelli modu: tüm sesli yardımlar açık
+        etkin["voice_assistant"] = etkin["voice_login"] = etkin["voice_analysis"] = True
+    if etkin["hearing_mode"]:  # İşitme engelli modu: görsel ve titreşimli uyarı zorunlu
+        etkin["flash_alert"] = True
+        etkin["vibration"] = True
+    return etkin
+
+
+@app.route("/setting", methods=["GET", "POST"])
+@erisim_gerekli
+def setting():
+    if request.method == "POST":
+        veri = request.get_json(silent=True) or {}
+        yeni = {anahtar: bool(veri.get(anahtar, False)) for anahtar in AYAR_VARSAYILANLARI}
+        try:
+            kullanici_ayarlarini_kaydet(yeni)
+        except sqlite3.Error:
+            logger.exception("Kullanıcı ayarları kaydedilemedi")
+            return jsonify({"ok": False}), 500
+        return jsonify({"ok": True, "ayarlar": yeni})
+    return render_template("setting.html", settings=kullanici_ayarlarini_getir())
+
+
 @app.route("/hesap", methods=["GET", "POST"])
 @erisim_gerekli
 def hesap():
@@ -1057,6 +1213,7 @@ def index():
     secilen_sehir = ""
     secilen_ilce = ""
     secilen_mahalle = ""
+    secilen_ulke_kodu = VARSAYILAN_ULKE_KODU
     sehirler = []
     ilce_verileri = {}
     mahalle_verileri = {}
@@ -1134,6 +1291,24 @@ def index():
         except Exception as e:
             logger.exception("Zemin CSV okuma hatası")
 
+    if os.path.exists(DATA_PATHS["tr_adres"]):
+        try:
+            adres_df = pd.read_csv(DATA_PATHS["tr_adres"], encoding="utf-8-sig")
+            if all(k in adres_df.columns for k in ["Sehir", "Ilce"]):
+                for sehir, grup in adres_df.groupby("Sehir"):
+                    sehir_temiz = gorunum_duzelt(sehir)
+                    mevcut = set(ilce_verileri.get(sehir_temiz, []))
+                    yeni = {gorunum_duzelt(x) for x in grup["Ilce"].dropna().unique().tolist()}
+                    ilce_verileri[sehir_temiz] = tekil_ve_sirali(list(mevcut | yeni))
+            if all(k in adres_df.columns for k in ["Sehir", "Ilce", "Mahalle"]):
+                for (sehir, ilce_adi), grup in adres_df.groupby(["Sehir", "Ilce"]):
+                    anahtar = f"{gorunum_duzelt(sehir)}|||{gorunum_duzelt(ilce_adi)}"
+                    mevcut = set(mahalle_verileri.get(anahtar, []))
+                    yeni = {gorunum_duzelt(x) for x in grup["Mahalle"].dropna().unique().tolist()}
+                    mahalle_verileri[anahtar] = tekil_ve_sirali(list(mevcut | yeni))
+        except Exception:
+            logger.exception("Türkiye adres CSV okuma hatası")
+
     tum_sehirler = set(sehirler)
     tum_sehirler.update(ilce_verileri.keys())
 
@@ -1176,6 +1351,10 @@ def index():
             secilen_sehir = gorunum_duzelt(request.form.get("sehir", ""))
             secilen_ilce = gorunum_duzelt(request.form.get("ilce", ""))
             secilen_mahalle = gorunum_duzelt(request.form.get("mahalle", ""))
+            secilen_ulke_kodu = (request.form.get("ulke", VARSAYILAN_ULKE_KODU) or VARSAYILAN_ULKE_KODU).strip().upper()[:3]
+
+            if secilen_ulke_kodu != VARSAYILAN_ULKE_KODU:
+                raise UlkeVerisiYok()
 
             zemin_bilgisi = zemin_bilgisi_getir(
                 zemin_df,
@@ -1189,7 +1368,6 @@ def index():
             bina_yasi = float(request.form.get("bina_yasi", 0) or 0)
             kat_sayisi = max(0, int(float(request.form.get("kat_sayisi", 0) or 0)))
             bulundugu_kat = max(0, int(float(request.form.get("bulundugu_kat", 0) or 0)))
-            kisi_sayisi = max(1, int(float(request.form.get("kisi_sayisi", 1) or 1)))
             erisim_ihtiyaci = request.form.get("erisim_ihtiyaci", "yok")
 
             otomatik_nufus, otomatik_yatak, otomatik_toplanma, otomatik_itfaiye = otomatik_model_degerleri(secilen_sehir, secilen_ilce)
@@ -1232,7 +1410,7 @@ def index():
 
                 oneriler = acil_oneriler_uret(risk_durumu, inputs)
                 oneriler.extend(kullaniciye_ozel_oneriler_uret(
-                    bina_yasi, kat_sayisi, bulundugu_kat, kisi_sayisi, erisim_ihtiyaci
+                    bina_yasi, kat_sayisi, bulundugu_kat, erisim_ihtiyaci
                 ))
                 oneriler = list(dict.fromkeys(oneriler))
 
@@ -1283,6 +1461,13 @@ def index():
             else:
                 tahmin_sonucu = "Model dosyası bulunamadı."
 
+        except UlkeVerisiYok:
+            ulke_adi = dict(ulke_listesi_getir()).get(secilen_ulke_kodu, secilen_ulke_kodu)
+            tahmin_sonucu = "Bu ülke için risk analizi henüz hazır değil"
+            aciklama = (
+                f"<b>{_html_escape(ulke_adi)}</b> için deprem verileri ve risk modeli henüz eklenmedi. "
+                "Bu ülke yakında analiz ekranında yer alacak; şimdilik ayrıntılı risk analizi yalnızca Türkiye için yapılabilir."
+            )
         except Exception as e:
             tahmin_sonucu = "Veri hatası!"
             logger.exception("Model yükleme/tahmin hatası")
@@ -1307,8 +1492,9 @@ def index():
     m = folium.Map(
         location=[39, 35],
         zoom_start=6,
-        tiles="cartodbpositron"
+        tiles=None
     )
+    harita_altligi_ekle(m)
 
     sehirleri_renklendir(
         m,
@@ -1393,13 +1579,26 @@ def index():
     else:
         gecmis_panel_html = ""
 
-    if tum_depremler:
-        deprem_listesi_html = "".join([
-            f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
-            for d in tum_depremler[:15]
-        ])
+    def _mag_degeri(d: Dict[str, Any]) -> float:
+        try:
+            return float(d.get("mag", 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _deprem_satiri(d: Dict[str, Any]) -> str:
+        return f"<li>{d.get('title', 'Bilinmeyen Konum')} - Büyüklük: {d.get('mag', '?')} - Kaynak: {d.get('kaynak', 'Bilinmiyor')}</li>"
+
+    buyuk_depremler = [d for d in tum_depremler if _mag_degeri(d) >= 4]
+    kucuk_depremler = [d for d in tum_depremler if _mag_degeri(d) < 4]
+
+    if buyuk_depremler:
+        deprem_listesi_html = "".join(_deprem_satiri(d) for d in buyuk_depremler[:15])
+    elif tum_depremler:
+        deprem_listesi_html = "<li>Şu anda 4.0 ve üzeri deprem yok. Daha küçük depremler sayfanın en altında listelenir.</li>"
     else:
         deprem_listesi_html = "<li>Güncel deprem verisi alınamadı.</li>"
+
+    kucuk_deprem_listesi_html = "".join(_deprem_satiri(d) for d in kucuk_depremler[:40]) or "<li>4.0'dan küçük güncel deprem yok.</li>"
 
     deprem_verileri_json = json.dumps(tum_depremler[:30], ensure_ascii=False)
 
@@ -1458,7 +1657,22 @@ def index():
     while len(kutular) < max(VARSAYILAN_KONUM_KUTUSU, len(mevcut_konumlar)):
         kutular.append(bos_kutu_html)
     sehir_kutulari_html = "".join(kutular)
-    hesap_ayar_etiketi = "✨ Hesap Oluştur" if misafir_mi() else "⚙️ Hesap Ayarları"
+    hesap_ayar_etiketi = "✨ Hesap Oluştur" if misafir_mi() else "👤 Profilim"
+    hesap_linkleri_html = (
+        f'<a class="hesap-ayar" href="{hesap_url}">{hesap_ayar_etiketi}</a>'
+        '<a class="hesap-ayar" href="/setting">⚙️ Ayarlar</a>'
+    )
+    ayarlar_json = json.dumps(etkin_ayarlar(kullanici_ayarlarini_getir()))
+
+    # --- Ülke seçimi ---
+    ulke_options = "".join(
+        f'<option value="{_esc(kod)}"{" selected" if kod == secilen_ulke_kodu else ""}>{_esc(ad)}</option>'
+        for kod, ad in ulke_listesi_getir()
+    )
+    sehir_listesi_tr_json = json.dumps(sehirler, ensure_ascii=False).replace("</", "<\\/")
+    onceki_secim_json = json.dumps(
+        {"ulke": secilen_ulke_kodu, "bolge": secilen_sehir, "yerlesim": secilen_ilce}, ensure_ascii=False
+    ).replace("</", "<\\/")
 
     html = f"""
     <!DOCTYPE html>
@@ -1494,591 +1708,8 @@ def index():
             }}
         </script>
 
-        <style>
-            :root {{
-                --bg1:#06111f;
-                --bg2:#0b1e35;
-                --card:rgba(12, 29, 52, 0.88);
-                --card2:rgba(17, 41, 72, 0.88);
-                --text:#eaf4ff;
-                --muted:#a8c5df;
-                --blue:#2f89ff;
-                --blue2:#00c2ff;
-                --danger:#ff3b3b;
-                --border:rgba(95, 177, 255, 0.25);
-            }}
-
-            #splash-screen {{
-                display:none;
-            }}
-
-            #splash-screen.fade-out {{
-                opacity:0;
-                pointer-events:none;
-            }}
-
-            .splash-image {{
-                width:100%;
-                height:100%;
-                object-fit:cover;
-            }}
-
-            body {{
-                background:
-                    radial-gradient(circle at top left, rgba(0,194,255,0.18), transparent 28%),
-                    radial-gradient(circle at bottom right, rgba(47,137,255,0.20), transparent 30%),
-                    linear-gradient(135deg, var(--bg1), var(--bg2));
-                color:var(--text);
-                font-family:Arial, sans-serif;
-                margin:0;
-                padding:15px;
-            }}
-
-            h1, h2 {{
-                text-align:center;
-            }}
-
-            .box {{
-                background:var(--card);
-                color:var(--text);
-                padding:22px;
-                border-radius:18px;
-                margin:14px auto;
-                max-width:1200px;
-                box-shadow:0 18px 45px rgba(0,0,0,0.35);
-                border:1px solid var(--border);
-                backdrop-filter: blur(10px);
-            }}
-
-            input,
-            select {{
-                padding:12px;
-                margin:5px;
-                border-radius:10px;
-                border:1px solid var(--border);
-                background:#0b1b31;
-                color:var(--text);
-            }}
-
-            label {{
-                display:block;
-                margin-top:10px;
-                font-weight:bold;
-                color:#dceeff;
-            }}
-
-            small {{
-                display:block;
-                color:var(--muted);
-                margin:0 5px 8px 5px;
-                line-height:1.4;
-            }}
-
-            .zemin-info-box {{
-                margin-top:15px;
-                padding:15px;
-                background:rgba(0,194,255,0.10);
-                color:#dff6ff;
-                border-left:6px solid var(--blue2);
-                border-radius:12px;
-                line-height:1.5;
-            }}
-
-            button {{
-                padding:12px 16px;
-                background:linear-gradient(135deg, var(--blue), var(--blue2));
-                color:white;
-                border:none;
-                border-radius:10px;
-                cursor:pointer;
-                font-weight:bold;
-                box-shadow:0 10px 25px rgba(0, 194, 255, 0.18);
-            }}
-
-            button:hover {{
-                filter:brightness(1.08);
-            }}
-
-            .risk-score-box {{
-                margin-top:15px;
-                padding:15px;
-                border-radius:12px;
-                background:rgba(255,255,255,0.08);
-                color:var(--text);
-                text-align:center;
-                font-size:20px;
-                font-weight:bold;
-                border:3px solid {risk_rengi};
-            }}
-
-            .earthquake-list {{
-                margin-top:15px;
-                padding:15px;
-                background:var(--card2);
-                color:var(--text);
-                border-radius:14px;
-                line-height:1.6;
-                border:1px solid var(--border);
-            }}
-
-            .example-box {{
-                margin-top:15px;
-                padding:15px;
-                background:rgba(255,255,255,0.08);
-                color:#dceeff;
-                border-radius:12px;
-                font-size:0.92em;
-                line-height:1.6;
-            }}
-
-            .suggestion-box {{
-                margin-top:20px;
-                padding:18px;
-                background:rgba(39,174,96,0.14);
-                color:#d8ffe8;
-                border-left:6px solid #27ae60;
-                border-radius:12px;
-                line-height:1.5;
-            }}
-
-            .accessibility-note {{
-                margin-top:20px;
-                padding:15px;
-                background:rgba(0,194,255,0.10);
-                color:#dff6ff;
-                border-radius:12px;
-                line-height:1.5;
-            }}
-
-            .landing-screen {{
-                min-height:100vh;
-                position:relative;
-                overflow:hidden;
-                border-radius:24px;
-                margin:0 auto 20px auto;
-                max-width:1250px;
-                background:
-                    linear-gradient(180deg, rgba(3,10,22,0.18), rgba(3,10,22,0.78)),
-                    url('/static/riskatlas-bg.png');
-                background-size:cover;
-                background-position:center;
-                border:1px solid var(--border);
-                box-shadow:0 25px 60px rgba(0,0,0,0.45);
-                padding:28px;
-                box-sizing:border-box;
-            }}
-
-            .landing-topbar {{
-                display:flex;
-                justify-content:space-between;
-                align-items:flex-start;
-                gap:18px;
-                position:relative;
-                z-index:2;
-            }}
-
-            .brand {{
-                display:flex;
-                align-items:center;
-                gap:12px;
-            }}
-
-            .brand-icon {{
-                width:54px;
-                height:54px;
-                border-radius:16px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:linear-gradient(135deg, #ef233c, #9d0208);
-                box-shadow:0 10px 25px rgba(255,59,59,0.28);
-                font-size:28px;
-            }}
-
-            .brand-title {{
-                font-size:30px;
-                font-weight:800;
-                letter-spacing:-0.5px;
-            }}
-
-            .brand-title span {{
-                color:#ff3b3b;
-            }}
-
-            .brand-subtitle {{
-                color:#d7eaff;
-                font-size:14px;
-                margin-top:2px;
-            }}
-
-            .top-actions {{
-                display:flex;
-                flex-wrap:wrap;
-                gap:10px;
-                justify-content:flex-end;
-            }}
-
-            .voice-toggle-btn {{
-                background:rgba(39,174,96,0.22) !important;
-                border:1px solid rgba(39,174,96,0.55) !important;
-            }}
-
-            .voice-toggle-btn.off {{
-                background:rgba(255,255,255,0.10) !important;
-                border:1px solid rgba(255,255,255,0.22) !important;
-                color:#cfd8e3;
-            }}
-
-            .top-actions button {{
-                background:rgba(8,24,43,0.72);
-                border:1px solid var(--border);
-                box-shadow:none;
-                padding:10px 14px;
-            }}
-
-            .landing-center {{
-                min-height:62vh;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                position:relative;
-                z-index:2;
-            }}
-
-            .landing-panel {{
-                width:min(560px, 92%);
-                padding:32px;
-                background:rgba(7,17,33,0.86);
-                border:1px solid var(--border);
-                border-radius:24px;
-                backdrop-filter:blur(14px);
-                text-align:center;
-                box-shadow:0 20px 60px rgba(0,0,0,0.42);
-            }}
-
-            .landing-panel h1 {{
-                text-align:center;
-                font-size:36px;
-                margin:0 0 8px 0;
-                letter-spacing:-0.5px;
-            }}
-
-            .landing-panel h1 span {{
-                color:#ff3b3b;
-            }}
-
-            .landing-panel h2 {{
-                text-align:center;
-                margin:18px 0 8px 0;
-                font-size:22px;
-            }}
-
-            .landing-panel p {{
-                color:#d7eaff;
-                font-size:16px;
-                line-height:1.55;
-                margin:8px 0;
-            }}
-
-            .location-symbol {{
-                margin:22px auto 14px auto;
-                width:92px;
-                height:92px;
-                border-radius:50%;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:radial-gradient(circle, rgba(47,137,255,0.28), rgba(0,194,255,0.06));
-                border:1px solid rgba(95,177,255,0.35);
-                font-size:54px;
-                box-shadow:0 0 45px rgba(47,137,255,0.28);
-            }}
-
-            .landing-actions {{
-                display:flex;
-                flex-wrap:wrap;
-                justify-content:center;
-                gap:12px;
-                margin-top:22px;
-            }}
-
-            .landing-actions button {{
-                min-width:170px;
-                font-size:16px;
-            }}
-
-            .secondary-btn {{
-                background:rgba(255,255,255,0.10);
-                border:1px solid var(--border);
-            }}
-
-            .status-box {{
-                margin-top:16px;
-                padding:14px;
-                border-radius:12px;
-                background:rgba(255,255,255,0.08);
-                color:#dff6ff;
-                line-height:1.5;
-            }}
-
-            .side-card {{
-                position:absolute;
-                z-index:2;
-                width:250px;
-                padding:18px;
-                border-radius:16px;
-                background:rgba(7,17,33,0.72);
-                border:1px solid var(--border);
-                backdrop-filter:blur(10px);
-                line-height:1.5;
-                box-shadow:0 18px 45px rgba(0,0,0,0.28);
-            }}
-
-            .side-card h3 {{
-                margin:0 0 8px 0;
-            }}
-
-            .side-card p,
-            .side-card li {{
-                color:#d7eaff;
-                font-size:14px;
-            }}
-
-            .side-card.left {{
-                left:28px;
-                bottom:145px;
-                border-color:rgba(255,59,59,0.42);
-            }}
-
-            .side-card.right {{
-                right:28px;
-                bottom:145px;
-                border-color:rgba(39,174,96,0.46);
-            }}
-
-            .side-card ul {{
-                margin:8px 0 0 0;
-                padding-left:22px;
-            }}
-
-            .bottom-features {{
-                position:absolute;
-                z-index:2;
-                left:28px;
-                right:28px;
-                bottom:28px;
-                display:grid;
-                grid-template-columns:repeat(4, 1fr);
-                gap:12px;
-                padding:14px;
-                background:rgba(7,17,33,0.64);
-                border:1px solid var(--border);
-                border-radius:18px;
-                backdrop-filter:blur(10px);
-            }}
-
-            .feature-item {{
-                display:flex;
-                gap:12px;
-                align-items:flex-start;
-                padding:10px;
-                border-right:1px solid rgba(95,177,255,0.16);
-            }}
-
-            .feature-item:last-child {{
-                border-right:none;
-            }}
-
-            .feature-icon {{
-                width:42px;
-                height:42px;
-                border-radius:50%;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                background:rgba(47,137,255,0.20);
-                font-size:22px;
-                flex-shrink:0;
-            }}
-
-            .feature-item b {{
-                display:block;
-                margin-bottom:4px;
-            }}
-
-            .feature-item span {{
-                color:#c8dff2;
-                font-size:14px;
-                line-height:1.4;
-            }}
-
-            .main-content {{
-                display:none;
-            }}
-
-            .main-content.active {{
-                display:block;
-            }}
-
-            .emergency-alert {{
-                display:none;
-                position:fixed;
-                z-index:99999;
-                top:0;
-                left:0;
-                width:100%;
-                height:100vh;
-                background:red;
-                color:white;
-                text-align:center;
-                padding:30vh 20px 0 20px;
-                box-sizing:border-box;
-                animation:flash 0.7s infinite;
-            }}
-
-            .emergency-alert h1 {{
-                font-size:44px;
-                margin-bottom:15px;
-            }}
-
-            .emergency-alert p {{
-                font-size:24px;
-                font-weight:bold;
-            }}
-
-            .close-alert {{
-                margin-top:20px;
-                background:white;
-                color:#b00000;
-                font-size:18px;
-            }}
-
-            @keyframes flash {{
-                0% {{ background-color:#ff0000; }}
-                50% {{ background-color:#6b0000; }}
-                100% {{ background-color:#ff0000; }}
-            }}
-
-            @media (max-width:700px) {{
-                #splash-screen {{
-                    position:fixed;
-                    inset:0;
-                    background:#081120;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    z-index:999999;
-                    transition:opacity .8s ease;
-                }}
-
-                body {{
-                    padding:8px;
-                    background:
-                        linear-gradient(180deg, rgba(3,10,22,0.35), rgba(3,10,22,0.88)),
-                        url('/static/mobile-bg.png');
-                    background-size: cover;
-                    background-position: center top;
-                    background-repeat: no-repeat;
-                    background-attachment: scroll;
-                }}
-
-                .landing-screen {{
-                    background:
-                        linear-gradient(180deg, rgba(3,10,22,0.25), rgba(3,10,22,0.82)),
-                        url('/static/mobile-bg.png');
-                    background-size: cover;
-                    background-position: center top;
-                    background-repeat: no-repeat;
-                    border-radius: 22px;
-                    overflow: hidden;
-                }}
-
-                .box {{
-                    padding:12px;
-                }}
-
-                input,
-                select,
-                button {{
-                    width:100%;
-                    box-sizing:border-box;
-                    margin:6px 0;
-                }}
-
-                h1 {{
-                    font-size:24px;
-                }}
-
-                h2 {{
-                    font-size:18px;
-                }}
-
-                .landing-screen {{
-                    min-height:auto;
-                    padding:14px;
-                }}
-
-                .landing-topbar {{
-                    flex-direction:column;
-                }}
-
-                .top-actions {{
-                    justify-content:flex-start;
-                }}
-
-                .top-actions button {{
-                    width: 100%;
-                    font-size: 16px;
-                    padding: 14px;
-                }}
-
-                .landing-center {{
-                    min-height:auto;
-                    padding:28px 0;
-                }}
-
-                .landing-panel {{
-                    padding:26px 20px;
-                    width:100%;
-                    border-radius:28px;
-                }}
-
-                .landing-panel h1 {{
-                    font-size:42px;
-                    line-height:1.15;
-                }}
-
-                .side-card {{
-                    position:static;
-                    width:auto;
-                    margin:12px 0;
-                }}
-
-                .bottom-features {{
-                    position:static;
-                    grid-template-columns:1fr;
-                    margin-top:12px;
-                }}
-
-                .feature-item {{
-                    border-right:none;
-                    border-bottom:1px solid rgba(95,177,255,0.16);
-                }}
-
-                .feature-item:last-child {{
-                    border-bottom:none;
-                }}
-
-                .emergency-alert h1 {{
-                    font-size:34px;
-                }}
-
-                .emergency-alert p {{
-                    font-size:20px;
-                }}
-            }}
-        </style>
         <link rel="stylesheet" href="/static/css/index.css">
+        <style>:root {{ --risk-rengi: {risk_rengi}; }}</style>
     </head>
 
     <body id="mainBody">
@@ -2216,7 +1847,7 @@ def index():
                 <h2 id="hesapPaneliBaslik">👤 Hesap</h2>
                 <button type="button" class="kapat" onclick="hesapPaneliniKapat()" aria-label="Paneli kapat">✕</button>
             </div>
-            <a class="hesap-ayar" href="{hesap_url}">{hesap_ayar_etiketi}</a>
+            {hesap_linkleri_html}
             <h3>📍 Şehirlerim <span class="sayac">{len(mevcut_konumlar)} kayıtlı</span></h3>
             <p class="ipucu">Şehir seçmek zorunlu değildir. Boş kutuları olduğu gibi bırakabilirsiniz.</p>
             <div id="sehirKutulari" class="sehir-kutulari">{sehir_kutulari_html}</div>
@@ -2263,7 +1894,7 @@ def index():
             {map_html}
 
             <div class="earthquake-list" aria-label="Canlı deprem listesi">
-                <h3>📋 Tüm Güncel Deprem Listesi</h3>
+                <h3>📋 4.0+ Güncel Depremler</h3>
                 <ul>
                     {deprem_listesi_html}
                 </ul>
@@ -2273,6 +1904,11 @@ def index():
         <div class="box">
 
             <form method="POST" id="analizFormuElementi">
+
+                <label for="ulke">🌍 Ülke Seçiniz</label>
+                <select id="ulke" name="ulke" onchange="ulkeyiGuncelle()">
+                    {ulke_options}
+                </select>
 
                 <label for="sehir">Şehir Seçiniz</label>
                 <select id="sehir" name="sehir" required onchange="ilceleriGuncelle()">
@@ -2303,9 +1939,6 @@ def index():
 
                 <label for="bulundugu_kat">📍 Hangi Katta Bulunuyorsunuz?</label>
                 <input id="bulundugu_kat" type="number" min="0" max="100" step="1" name="bulundugu_kat" placeholder="Örn: 3" required>
-
-                <label for="kisi_sayisi">👥 Evde Kaç Kişi Yaşıyor?</label>
-                <input id="kisi_sayisi" type="number" min="1" max="100" step="1" name="kisi_sayisi" placeholder="Örn: 4" required>
 
                 <div class="zemin-info-box">
                     <b>🌍 Bölgesel Veriler:</b><br>
@@ -2379,6 +2012,14 @@ def index():
                 ✅ Büyük yazı ve yüksek kontrastlı acil durum ekranı ve zihinsel engelli bireyler için evrensel sembol tasarımı
             </div>
         </div>
+        <section class="box kucuk-depremler" aria-label="4.0'dan küçük depremler">
+            <div class="earthquake-list">
+                <h3>📋 4.0'dan Küçük Güncel Depremler</h3>
+                <ul>
+                    {kucuk_deprem_listesi_html}
+                </ul>
+            </div>
+        </section>
         </main>
 
         <script>
@@ -2399,6 +2040,12 @@ def index():
             const analizYapildi = "{analiz_yapildi}" === "True";
             const depremVerileri = {deprem_verileri_json};
             const ilceVerileri = {ilce_verileri_json};
+            const sehirListesiTR = {sehir_listesi_tr_json};
+            const ONCEKI_SECIM = {onceki_secim_json};
+            const AYARLAR = {ayarlar_json};
+            document.documentElement.classList.toggle("ayar-buyuk-yazi", !!AYARLAR.large_text);
+            document.documentElement.classList.toggle("ayar-yuksek-kontrast", !!AYARLAR.high_contrast);
+            let ulkeBolgeleri = null;
             const mahalleVerileri = {mahalle_verileri_json};
             const pythonTakipListesi = {takip_listesi_json};
 
@@ -2406,7 +2053,7 @@ def index():
 
             // KALICI HAFIZA VE ROBOT AYARLARI ALTYAPISI
             let aktifEvKonumu = {json.dumps(aktif_ana_konum, ensure_ascii=False)};
-            let aiRobotAktifMi = localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
+            let aiRobotAktifMi = AYARLAR.voice_assistant && localStorage.getItem("riskAtlasAiRobotAyar") !== "kapali";
             let sesliRehberKonustu = false;
 
             function aiRobotAyariniGuncelle() {{
@@ -2670,12 +2317,13 @@ def index():
                                 const uyariMetni = "Dikkat! Seyahat listenizdeki " + takipSehir + " bölgesinde " + mag + " büyüklüğünde kritik deprem tespit edildi! Güvenli yerlere geçin.";
                                 document.getElementById("alertMainParagraph").innerText = uyariMetni;
                                 
-                                if (navigator.vibrate) {{
+                                if (AYARLAR.vibration && navigator.vibrate) {{
                                     navigator.vibrate([400, 200, 400, 200, 800, 200, 400]);
                                 }}
                                 
                                 document.getElementById("emergencyAlert").style.display = "block";
-                                robotKonus(uyariMetni);
+                                flasUyarisiVer();
+                                if (AYARLAR.sound_alarm) {{ robotKonus(uyariMetni); }}
                             }}
                         }});
                     }}
@@ -2718,7 +2366,7 @@ def index():
             function detayliAnalizeGec() {{
                 document.getElementById("landingScreen").style.display = "none";
                 document.getElementById("mainContent").classList.add("active");
-                robotKonus("Detaylı analiz ekranına geçildi. Harita ve parametre formları yüklendi.");
+                if (AYARLAR.voice_analysis) {{ robotKonus("Detaylı analiz ekranına geçildi. Harita ve parametre formları yüklendi."); }}
             }}
 
             function mesafeKm(lat1, lon1, lat2, lon2) {{
@@ -2796,12 +2444,95 @@ def index():
                 );
             }}
 
+            function secenekleriYaz(select, liste, ilkMetin, secili) {{
+                if (!select) return;
+                select.innerHTML = "";
+                const ilk = document.createElement("option");
+                ilk.value = "";
+                ilk.textContent = ilkMetin;
+                select.appendChild(ilk);
+                liste.forEach(function (deger) {{
+                    const o = document.createElement("option");
+                    o.value = deger;
+                    o.textContent = deger;
+                    if (secili && deger === secili) o.selected = true;
+                    select.appendChild(o);
+                }});
+            }}
+
+            function etiketleriGuncelle(yerel) {{
+                const yaz = function (id, metin) {{
+                    const el = document.querySelector('label[for="' + id + '"]');
+                    if (el) el.textContent = metin;
+                }};
+                yaz("sehir", yerel ? "Şehir Seçiniz" : "Eyalet / Bölge Seçiniz");
+                yaz("ilce", yerel ? "İlçe Seçiniz" : "Şehir / Kasaba Seçiniz");
+                yaz("mahalle", yerel ? "Mahalle Seçiniz" : "Mahalle (bu ülke için yok)");
+            }}
+
+            async function ulkeyiGuncelle(geriYukle) {{
+                const ulkeSelect = document.getElementById("ulke");
+                const sehirSelect = document.getElementById("sehir");
+                if (!ulkeSelect || !sehirSelect) return;
+
+                const kod = ulkeSelect.value || "TR";
+                const secili = geriYukle === true ? ONCEKI_SECIM : {{ bolge: "", yerlesim: "" }};
+
+                if (kod === "TR") {{
+                    ulkeBolgeleri = null;
+                    etiketleriGuncelle(true);
+                    secenekleriYaz(sehirSelect, sehirListesiTR, "Şehir seçiniz", secili.bolge);
+                    ilceleriGuncelle();
+                    return;
+                }}
+
+                etiketleriGuncelle(false);
+                secenekleriYaz(sehirSelect, [], "Yükleniyor...", "");
+                try {{
+                    const yanit = await fetch("/api/ulke/" + encodeURIComponent(kod));
+                    const veri = await yanit.json();
+                    if (!veri.veri_var) {{
+                        ulkeBolgeleri = {{}};
+                        secenekleriYaz(sehirSelect, [], "Bu ülke için veri henüz eklenmedi", "");
+                        ilceleriGuncelle();
+                        return;
+                    }}
+                    ulkeBolgeleri = veri.bolgeler;
+                    const bolgeler = Object.keys(ulkeBolgeleri).sort((a, b) => a.localeCompare(b, "tr"));
+                    secenekleriYaz(sehirSelect, bolgeler, "Eyalet / bölge seçiniz", secili.bolge);
+                    ilceleriGuncelle();
+                }} catch (hata) {{
+                    ulkeBolgeleri = {{}};
+                    secenekleriYaz(sehirSelect, [], "Ülke verisi alınamadı", "");
+                }}
+            }}
+
+            document.addEventListener("DOMContentLoaded", function () {{
+                if (ONCEKI_SECIM.ulke && ONCEKI_SECIM.ulke !== "TR") {{
+                    ulkeyiGuncelle(true);
+                }}
+            }});
+
             function ilceleriGuncelle() {{
                 const sehirSelect = document.getElementById("sehir");
                 const ilceSelect = document.getElementById("ilce");
                 const mahalleSelect = document.getElementById("mahalle");
 
                 if (!sehirSelect || !ilceSelect) {{
+                    return;
+                }}
+
+                if (ulkeBolgeleri) {{
+                    const bolgeSehirleri = (ulkeBolgeleri[sehirSelect.value] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
+                    secenekleriYaz(
+                        ilceSelect,
+                        bolgeSehirleri,
+                        sehirSelect.value ? (bolgeSehirleri.length ? "Şehir / kasaba seçiniz" : "Şehir / kasaba verisi bulunamadı") : "Önce eyalet / bölge seçiniz",
+                        ONCEKI_SECIM.yerlesim
+                    );
+                    if (mahalleSelect) {{
+                        secenekleriYaz(mahalleSelect, [], "Bu ülke için mahalle verisi yok", "");
+                    }}
                     return;
                 }}
 
@@ -2856,6 +2587,10 @@ def index():
                     return;
                 }}
 
+                if (ulkeBolgeleri) {{
+                    return;
+                }}
+
                 const anahtar = sehirSelect.value + "|||" + ilceSelect.value;
                 const mahalleler = (mahalleVerileri[anahtar] || []).slice().sort((a, b) => a.localeCompare(b, "tr"));
 
@@ -2882,9 +2617,16 @@ def index():
                 }});
             }}
 
+            function flasUyarisiVer() {{
+                if (!AYARLAR.flash_alert) return;
+                document.body.classList.add("ayar-flas-uyarisi");
+                setTimeout(function () {{ document.body.classList.remove("ayar-flas-uyarisi"); }}, 5000);
+            }}
+
             function acilDurumGoster() {{
                 document.getElementById("emergencyAlert").style.display = "block";
-                if (navigator.vibrate) navigator.vibrate([500, 300, 500, 300, 1000]);
+                if (AYARLAR.vibration && navigator.vibrate) navigator.vibrate([500, 300, 500, 300, 1000]);
+                flasUyarisiVer();
             }}
 
             function acilDurumKapat() {{

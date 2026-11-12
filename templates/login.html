@@ -34,7 +34,7 @@
             {% endif %}
         {% endwith %}
 
-        <!-- JavaScript Hata Özeti -->
+        <!-- JavaScript Hata Özeti (login.js tarafından yönetilir) -->
         <div id="jsErrorSummary" class="js-error-summary" role="alert" aria-live="assertive"></div>
 
         <!-- Giriş Formu -->
@@ -58,9 +58,10 @@
                     placeholder="ornek@mail.com" 
                     autocomplete="email" 
                     aria-required="true" 
-                    aria-describedby="emailError jsErrorSummary" 
+                    aria-describedby="email-error jsErrorSummary" 
                     required>
-                <div id="emailError" class="field-error visually-hidden" role="alert"></div>
+                <!-- login.js'in beklediği ID: email-error -->
+                <div id="email-error" class="field-error visually-hidden" role="alert"></div>
             </div>
 
             <!-- Şifre Alanı -->
@@ -77,7 +78,7 @@
                         placeholder="Şifrenizi giriniz" 
                         autocomplete="current-password" 
                         aria-required="true" 
-                        aria-describedby="passwordError capsLockWarning jsErrorSummary" 
+                        aria-describedby="password-error capsLockWarning jsErrorSummary" 
                         required>
                     
                     <button 
@@ -89,7 +90,8 @@
                         <i class="fa-solid fa-eye-slash" id="togglePasswordIcon" aria-hidden="true"></i>
                     </button>
                 </div>
-                <div id="passwordError" class="field-error visually-hidden" role="alert"></div>
+                <!-- login.js'in beklediği ID: password-error -->
+                <div id="password-error" class="field-error visually-hidden" role="alert"></div>
                 
                 <!-- Caps Lock Uyarısı -->
                 <div id="capsLockWarning" class="caps-lock-warning" role="alert" aria-live="polite">
@@ -107,7 +109,7 @@
             </div>
 
             <!-- Giriş Butonu -->
-            <button type="submit" id="submitBtn" class="btn-login">
+            <button type="submit" id="submitBtn" class="btn-login" aria-busy="false">
                 <i class="fa-solid fa-right-to-bracket" id="submitIcon" aria-hidden="true"></i>
                 <span id="submitBtnText">Giriş Yap</span>
             </button>
@@ -121,7 +123,7 @@
             Hesabınız yok mu? Hesap Oluştur
         </a>
 
-        <!-- Sesli Yardım Butonu -->
+        <!-- Sesli Yardım Butonu (assistant.js ile entegre) -->
         <button id="voiceLogin" class="voice-button" type="button">
             <i class="fa-solid fa-microphone" aria-hidden="true"></i>
             Sesli Yardımı Başlat
@@ -129,6 +131,7 @@
 
         <!-- Misafir Giriş Alanı -->
         <div class="guest-area">
+            <!-- ÖNEMLİ: guest_login rotasına yönlendirir, index'e değil -->
             <a href="{{ url_for('guest_login') }}" class="guest-link">
                 <i class="fa-solid fa-user-secret" aria-hidden="true"></i>
                 Misafir Olarak Devam Et
@@ -141,109 +144,7 @@
 {% endblock %}
 
 {% block page_js %}
+<!-- Önce sesli asistan, sonra gelişmiş form mantığı yüklenir -->
 <script src="{{ url_for('static', filename='js/assistant.js') }}"></script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-    // 1. Şifre Göster/Gizle İşlevi
-    const toggleBtn = document.getElementById("togglePassword");
-    const passwordInput = document.getElementById("password");
-    const toggleIcon = document.getElementById("togglePasswordIcon");
-
-    if (toggleBtn && passwordInput) {
-        toggleBtn.addEventListener("click", () => {
-            const type = passwordInput.getAttribute("type") === "password" ? "text" : "password";
-            passwordInput.setAttribute("type", type);
-            toggleIcon.classList.toggle("fa-eye");
-            toggleIcon.classList.toggle("fa-eye-slash");
-            toggleBtn.setAttribute("aria-label", type === "password" ? "Şifreyi göster" : "Şifreyi gizle");
-        });
-    }
-
-    // 2. Caps Lock Uyarı İşlevi
-    const capsLockWarning = document.getElementById("capsLockWarning");
-    if (passwordInput && capsLockWarning) {
-        passwordInput.addEventListener("keyup", (event) => {
-            if (event.getModifierState("CapsLock")) {
-                capsLockWarning.classList.add("visible");
-            } else {
-                capsLockWarning.classList.remove("visible");
-            }
-        });
-    }
-
-    // 3. Form Gönderimi ve İstemci Taraflı Validasyon
-    const loginForm = document.getElementById("loginForm");
-    const emailInput = document.getElementById("email");
-    const submitBtn = document.getElementById("submitBtn");
-    const submitBtnText = document.getElementById("submitBtnText");
-    const submitIcon = document.getElementById("submitIcon");
-    const jsErrorSummary = document.getElementById("jsErrorSummary");
-
-    if (loginForm) {
-        loginForm.addEventListener("submit", function(e) {
-            let isValid = true;
-            const errors = [];
-
-            // E-posta kontrolü
-            const emailError = document.getElementById("emailError");
-            if (!emailInput.value.trim()) {
-                emailError.textContent = "E-posta adresi zorunludur.";
-                emailError.classList.remove("visually-hidden");
-                emailInput.classList.add("is-invalid");
-                isValid = false;
-                errors.push("E-posta adresi zorunludur.");
-            } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value)) {
-                emailError.textContent = "Geçerli bir e-posta adresi giriniz.";
-                emailError.classList.remove("visually-hidden");
-                emailInput.classList.add("is-invalid");
-                isValid = false;
-                errors.push("Geçerli bir e-posta adresi giriniz.");
-            } else {
-                emailError.classList.add("visually-hidden");
-                emailInput.classList.remove("is-invalid");
-                emailInput.classList.add("is-valid");
-            }
-
-            // Şifre kontrolü
-            const passwordError = document.getElementById("passwordError");
-            if (!passwordInput.value) {
-                passwordError.textContent = "Şifre zorunludur.";
-                passwordError.classList.remove("visually-hidden");
-                passwordInput.classList.add("is-invalid");
-                isValid = false;
-                errors.push("Şifre zorunludur.");
-            } else {
-                passwordError.classList.add("visually-hidden");
-                passwordInput.classList.remove("is-invalid");
-                passwordInput.classList.add("is-valid");
-            }
-
-            if (!isValid) {
-                e.preventDefault(); // Hata varsa formu gönderme
-                jsErrorSummary.innerHTML = "<strong>Lütfen aşağıdaki hataları düzeltin:</strong><ul>" +
-                    errors.map(err => `<li>${err}</li>`).join('') + "</ul>";
-                jsErrorSummary.classList.add("visible");
-            } else {
-                // Başarılıysa butonu devre dışı bırak ve loading animasyonu göster
-                submitBtn.disabled = true;
-                submitBtnText.textContent = "Giriş yapılıyor...";
-                if (submitIcon) {
-                    submitIcon.className = "fa-solid fa-circle-notch fa-spin";
-                }
-            }
-        });
-    }
-
-    // Inputlara odaklanınca hata sınıflarını temizle
-    [emailInput, passwordInput].forEach(input => {
-        if (input) {
-            input.addEventListener("focus", function() {
-                this.classList.remove("is-invalid");
-                const errorDiv = document.getElementById(this.id + "Error");
-                if (errorDiv) errorDiv.classList.add("visually-hidden");
-            });
-        }
-    });
-});
-</script>
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
 {% endblock %}
